@@ -470,6 +470,8 @@
       const [items, setItems] = useState([]);
       const [influencerMeta, setInfluencerMeta] = useState({ subscribers: "", channelUrl: "" });
       const [fetchedAt, setFetchedAt] = useState(null);
+      // Apps Script에서 받아온 지난 정산 요청 내역 (시트의 '정산 요청 로그' 탭)
+      const [serverPayoutLog, setServerPayoutLog] = useState([]);
 
       // 정산 모달 상태
       const [confirmOpen, setConfirmOpen] = useState(false);
@@ -507,6 +509,8 @@
               channelUrl:  my[0].influencerChannelUrl || "",
             });
           }
+          // 서버에서 내려준 정산 요청 로그 (구버전 Apps Script면 undefined — 빈 배열로 처리)
+          setServerPayoutLog(Array.isArray(data.payoutLog) ? data.payoutLog : []);
           setFetchedAt(new Date());
         } catch(e) {
           setError(`데이터 불러오기 실패: ${e.message}`);
@@ -531,6 +535,20 @@
         return { totalClicks, totalIncentive, totalViews, videoCount: items.length };
       }, [items]);
 
+      // 이미 정산 요청한 누적 금액/클릭 (시트의 '정산 요청 로그' 기준)
+      // 이 값을 현재 누적 인센티브에서 빼서 '이번 요청 금액'을 산출 → 중복 정산 방지
+      const paidSummary = useMemo(() => {
+        const paidAmount = serverPayoutLog.reduce((a, r) => a + Number(r.amount || 0), 0);
+        const paidClicks = serverPayoutLog.reduce((a, r) => a + Number(r.clickCount || 0), 0);
+        return { paidAmount, paidClicks, payoutCount: serverPayoutLog.length };
+      }, [serverPayoutLog]);
+
+      const pending = useMemo(() => {
+        const pendingAmount = Math.max(0, totals.totalIncentive - paidSummary.paidAmount);
+        const pendingClicks = Math.max(0, totals.totalClicks - paidSummary.paidClicks);
+        return { pendingAmount, pendingClicks };
+      }, [totals, paidSummary]);
+
       const payoutDate = useMemo(() => calculatePayoutDate(new Date()), []);
 
       const submitPayout = async () => {
@@ -539,11 +557,16 @@
           const payload = {
             action: "payout",
             influencer: influencerName,
-            amount: totals.totalIncentive,
+            amount: pending.pendingAmount,              // ★ 누적이 아닌 '이번 요청분'만 전송
             videoCount: totals.videoCount,
-            clickCount: totals.totalClicks,
+            clickCount: pending.pendingClicks,          // ★ 신규 클릭 수
             clickedAt: new Date().toISOString(),
             payoutDate: payoutDate.toISOString(),
+            // 참고용 메타: 시트 담당자가 검토할 때 맥락 제공
+            cumulativeAmount: totals.totalIncentive,
+            cumulativeClicks: totals.totalClicks,
+            previouslyPaidAmount: paidSummary.paidAmount,
+            previousPayoutCount: paidSummary.payoutCount,
           };
           const resp = await postPayoutToAppsScript(apiUrl, payload);
           const record = {
@@ -559,6 +582,18 @@
             localStorage.setItem(KEY_PAYOUT_LOG, JSON.stringify(arr));
             setLocalLog(arr.filter(x => x.influencer === influencerName));
           } catch(e) {}
+          // 서버 로그에도 이번 건을 즉시 반영(다음 계산부터 중복 정산 방지)
+          setServerPayoutLog(prev => [
+            ...prev,
+            {
+              requestedAt: payload.clickedAt,
+              amount: payload.amount,
+              videoCount: payload.videoCount,
+              clickCount: payload.clickCount,
+              payoutDate: payload.payoutDate,
+              status: "요청 접수",
+            },
+          ]);
           setResultPayload(record);
           setConfirmOpen(false);
           setResultOpen(true);
@@ -613,23 +648,46 @@
                 {/* 메인 정산 카드 */}
                 <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl p-8 mb-6">
                   <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
-                    <div>
-                      <p className="text-sm text-indigo-200 mb-1">정산 받을 금액</p>
-                      <p className="text-5xl font-bold tabular-nums">{formatKRW(totals.totalIncentive)}</p>
+                    <div className="flex-1">
+                      <p className="text-sm text-indigo-200 mb-1">이번에 정산 받을 금액 (미지급)</p>
+                      <p className="text-5xl font-bold tabular-nums">{formatKRW(pending.pendingAmount)}</p>
                       <p className="text-sm text-indigo-200 mt-2">
-                        콘텐츠 {totals.videoCount}개 · 총 클릭 {formatNumber(totals.totalClicks)}회
+                        신규 클릭 {formatNumber(pending.pendingClicks)}회 · 콘텐츠 {totals.videoCount}개
                       </p>
+
+                      {/* 누적/완료 breakdown */}
+                      <div className="mt-4 pt-4 border-t border-indigo-400/40 grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <div className="text-indigo-200">누적 인센티브</div>
+                          <div className="font-semibold tabular-nums">{formatKRW(totals.totalIncentive)}</div>
+                          <div className="text-indigo-300">총 클릭 {formatNumber(totals.totalClicks)}회</div>
+                        </div>
+                        <div>
+                          <div className="text-indigo-200">기존 정산 완료</div>
+                          <div className="font-semibold tabular-nums">- {formatKRW(paidSummary.paidAmount)}</div>
+                          <div className="text-indigo-300">
+                            {paidSummary.payoutCount > 0
+                              ? `${paidSummary.payoutCount}회 요청 · 클릭 ${formatNumber(paidSummary.paidClicks)}회`
+                              : "지난 요청 없음"}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right lg:min-w-[200px]">
                       <p className="text-xs text-indigo-200 mb-1">지금 신청 시 지급 예정일</p>
                       <p className="text-xl font-semibold">{formatDateKR(payoutDate)}</p>
                       <button
                         onClick={() => setConfirmOpen(true)}
-                        disabled={totals.totalIncentive <= 0}
+                        disabled={pending.pendingAmount <= 0}
                         className="mt-4 inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg"
                       >
                         <MoneyIcon className="w-5 h-5" /> 정산 받기
                       </button>
+                      {pending.pendingAmount <= 0 && (
+                        <p className="mt-2 text-[11px] text-indigo-200">
+                          지금 정산할 금액이 없어요.<br/>새로운 클릭이 쌓이면 다시 신청할 수 있어요.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -727,8 +785,10 @@
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4 space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-gray-500">인플루언서</span><span className="font-semibold">{influencerName}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">콘텐츠 수</span><span className="font-semibold">{totals.videoCount}개</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">총 클릭</span><span className="font-semibold">{formatNumber(totals.totalClicks)}회</span></div>
-                  <div className="flex justify-between border-t pt-2 mt-2"><span className="text-gray-700">정산 금액</span><span className="font-bold text-rose-700 text-lg">{formatKRW(totals.totalIncentive)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">누적 클릭</span><span>{formatNumber(totals.totalClicks)}회</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">누적 인센티브</span><span>{formatKRW(totals.totalIncentive)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">기존 정산 완료</span><span className="text-gray-600">- {formatKRW(paidSummary.paidAmount)}</span></div>
+                  <div className="flex justify-between border-t pt-2 mt-2"><span className="text-gray-700">이번 정산 금액</span><span className="font-bold text-rose-700 text-lg">{formatKRW(pending.pendingAmount)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">지급 예정일</span><span className="font-semibold">{formatDateKR(payoutDate)}</span></div>
                 </div>
                 {submitError && (

@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>캐치테이블 미식 파트너스 대시보드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    // ---- localStorage 키 ----
+    const KEY_CLIENT_ID       = "ct-partners:clientId";
+    const KEY_YT_API_KEY      = "ct-partners:ytApiKey";
+    const KEY_SHEET_ID        = "ct-partners:sheetId";
+    const KEY_SHEET_GID       = "ct-partners:sheetGid";
+    const KEY_INCENTIVE       = "ct-partners:incentive";
+    const KEY_APPS_SCRIPT_URL = "ct-partners:appsScriptUrl";
+    const KEY_PAYOUT_LOG      = "ct-partners:payoutLog";
+
+    const DEFAULT_SHEET_ID = "1rYBgdB7n3R9WYNyzrBr01ArDjNQ8ie14Uuw-2q3N7tc";
+    const DEFAULT_SHEET_GID = "1947202841";
+    const DEFAULT_INCENTIVE = 100;
+    // 이미 사용 중인 값들 — 브라우저 캐시를 지워도 자동으로 채워짐
+    const DEFAULT_CLIENT_ID = "181610504543-8gpsu1gnciqhkkpbvee70ns506h679lt.apps.googleusercontent.com";
+    const DEFAULT_YT_API_KEY = "AIzaSyBt-bW2HlywgbtdeVUqgPGwaHVar2umGZs";
+    const DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwrSrwzP8VHY_SMNe9WyvsyIr-TAfYHBMreensQPOEOrLddRwmqRQPDQaiJ_-FjyLMG0A/exec";
+
+    // ---- URL 파라미터 ----
+    const urlParams = typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search)
+      : new URLSearchParams();
+    const URL_INFLUENCER = urlParams.get("influencer") || "";
+    const URL_API        = urlParams.get("api") || "";
+    const IS_INFLUENCER_MODE = !!URL_INFLUENCER;
+
+    // ---- 아이콘 ----
+    const Icon = ({ path, className = "w-5 h-5" }) => (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2"
+           viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+        {path}
+      </svg>
+    );
+    const EyeIcon      = (p) => <Icon {...p} path={<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></>} />;
+    const ThumbsIcon   = (p) => <Icon {...p} path={<path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H6a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11l3.28-6.55A1.5 1.5 0 0 1 16 3.5a2.5 2.5 0 0 1 2 2.5l-3 0"/>} />;
+    const MsgIcon      = (p) => <Icon {...p} path={<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>} />;
+    const ClickIcon    = (p) => <Icon {...p} path={<><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/></>} />;
+    const MoneyIcon    = (p) => <Icon {...p} path={<><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></>} />;
+    const TableIcon    = (p) => <Icon {...p} path={<><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></>} />;
+    const LoaderIcon   = (p) => <Icon {...p} path={<><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>} />;
+    const AlertIcon    = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
+    const CheckIcon    = (p) => <Icon {...p} path={<polyline points="20 6 9 17 4 12"/>} />;
+    const GoogleIcon   = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></>} />;
+    const KeyIcon      = (p) => <Icon {...p} path={<><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></>} />;
+    const RefreshIcon  = (p) => <Icon {...p} path={<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>} />;
+    const SheetIcon    = (p) => <Icon {...p} path={<><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="9" x2="9" y2="21"/></>} />;
+    const UserIcon     = (p) => <Icon {...p} path={<><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>} />;
+    const ReserveIcon  = (p) => <Icon {...p} path={<><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/><path d="m9 16 2 2 4-4"/></>} />;
+    const TrophyIcon   = (p) => <Icon {...p} path={<><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 4H4v3a3 3 0 0 0 3 3M17 4h3v3a3 3 0 0 1-3 3"/></>} />;
+    const DownloadIcon = (p) => <Icon {...p} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>} />;
+    const LogoutIcon   = (p) => <Icon {...p} path={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>} />;
+
+    // ---- 헬퍼 ----
+    function extractVideoId(input) {
+      if (!input) return null;
+      const s = String(input).trim();
+      if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+      try {
+        const url = new URL(s);
+        const host = url.hostname.replace(/^www\.|^m\./, "");
+        if (host === "youtu.be") {
+          const id = url.pathname.split("/").filter(Boolean)[0];
+          return /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+        }
+        if (host.endsWith("youtube.com")) {
+          const v = url.searchParams.get("v");
+          if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+          const parts = url.pathname.split("/").filter(Boolean);
+          const idx = parts.findIndex(p => ["shorts","embed","live"].includes(p));
+          if (idx >= 0 && parts[idx+1] && /^[a-zA-Z0-9_-]{11}$/.test(parts[idx+1])) return parts[idx+1];
+        }
+      } catch(e) {}
+      return null;
+    }
+    function formatNumber(n) {
+      if (n === null || n === undefined || n === "") return "—";
+      const num = Number(String(n).replace(/,/g, ""));
+      if (Number.isNaN(num)) return String(n);
+      return num.toLocaleString("ko-KR");
+    }
+    function formatKRW(n) {
+      if (n === null || n === undefined || n === "") return "—";
+      const num = Number(String(n).replace(/,/g, ""));
+      if (Number.isNaN(num)) return String(n);
+      return num.toLocaleString("ko-KR") + "원";
+    }
+    function parseSheetNumber(v) {
+      if (v === null || v === undefined) return 0;
+      const s = String(v).replace(/,/g, "").trim();
+      if (!s || s === "-" || s === "—") return 0;
+      const n = Number(s);
+      return Number.isNaN(n) ? 0 : n;
+    }
+
+    // ---- 정산 주기 계산 ----
+    // 규칙:
+    //  사이클 A: 매월 둘째주 수요일 ~ 월말일  → 지급일 = 익월 둘째주 수요일
+    //  사이클 B: 월말일 ~ 익월 둘째주 수요일  → 지급일 = 익월 말일
+    //  (즉, 지급일 = "다음 사이클의 마감일")
+    function getSecondWednesday(year, month) {
+      // month: 0-indexed (0=1월)
+      const first = new Date(year, month, 1);
+      const dow = first.getDay(); // 0=일 ~ 6=토, 3=수
+      const daysUntilWed = (3 - dow + 7) % 7;
+      const firstWed = 1 + daysUntilWed;
+      return new Date(year, month, firstWed + 7);
+    }
+    function getLastDayOfMonth(year, month) {
+      return new Date(year, month + 1, 0);
+    }
+    function atMidnight(d) {
+      const x = new Date(d);
+      x.setHours(0, 0, 0, 0);
+      return x;
+    }
+    function calculatePayoutDate(clickDate) {
+      const d = atMidnight(clickDate);
+      const year = d.getFullYear();
+      const month = d.getMonth();
+      const secWed       = atMidnight(getSecondWednesday(year, month));
+      const lastDay      = atMidnight(getLastDayOfMonth(year, month));
+      const nextSecWed   = atMidnight(getSecondWednesday(year, month + 1));
+      const nextLastDay  = atMidnight(getLastDayOfMonth(year, month + 1));
+      // 사이클 A: [secWed, lastDay) → 지급 = 익월 둘째주 수
+      if (d >= secWed && d < lastDay) return nextSecWed;
+      // 사이클 B: [lastDay, ...) → 지급 = 익월 말일
+      if (d >= lastDay) return nextLastDay;
+      // d < secWed → 직전 월말일 이후 시작된 사이클 B → 지급 = 이번 달 말일
+      return lastDay;
+    }
+    const WEEKDAY_KR = ["일","월","화","수","목","금","토"];
+    function formatDateKR(d) {
+      if (!d) return "—";
+      const x = new Date(d);
+      const y = x.getFullYear();
+      const m = String(x.getMonth() + 1).padStart(2, "0");
+      const day = String(x.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day} (${WEEKDAY_KR[x.getDay()]})`;
+    }
+
+    // ---- Apps Script 웹훅 ----
+    async function fetchInfluencerDataFromAppsScript(apiUrl, influencer) {
+      if (!apiUrl) throw new Error("Apps Script URL이 설정되지 않았습니다.");
+      const url = `${apiUrl}?influencer=${encodeURIComponent(influencer)}`;
+      const res = await fetch(url, { method: "GET", redirect: "follow" });
+      if (!res.ok) throw new Error(`Apps Script HTTP ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    }
+    async function postPayoutToAppsScript(apiUrl, payload) {
+      if (!apiUrl) throw new Error("Apps Script URL이 설정되지 않았습니다.");
+      const res = await fetch(apiUrl, {
+        method: "POST",
+        // Apps Script 웹앱은 application/json 프리플라이트가 번거로우니 text/plain 사용
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload),
+        redirect: "follow",
+      });
+      if (!res.ok) throw new Error(`Apps Script HTTP ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    }
+
+    // ---- 인플루언서 공유 링크 생성 ----
+    function buildInfluencerShareUrl(influencerName, apiUrl) {
+      const base = typeof window !== "undefined"
+        ? `${window.location.origin}${window.location.pathname}`
+        : "";
+      const params = new URLSearchParams();
+      params.set("influencer", influencerName);
+      if (apiUrl) params.set("api", apiUrl);
+      return `${base}?${params.toString()}`;
+    }
+
+    // ---- 시트 파싱 ----
+    function parseSheetRows(rows) {
+      if (!rows || rows.length === 0) return { items: [], headerIdx: -1 };
+
+      let headerIdx = -1;
+      let headerRow = null;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i] && rows[i].some(c => String(c || "").trim() === "링크삽입일")) {
+          headerIdx = i;
+          headerRow = rows[i];
+          break;
+        }
+      }
+      if (headerIdx < 0) return { items: [], headerIdx: -1, error: "시트에서 '링크삽입일' 헤더를 찾지 못했습니다." };
+
+      const col = {};
+      headerRow.forEach((c, i) => { col[String(c || "").trim()] = i; });
+
+      const items = [];
+      let currentInfluencer = null;
+
+      for (let i = headerIdx + 1; i < rows.length; i++) {
+        const row = rows[i] || [];
+        const first = String(row[0] || "").trim();
+
+        if (!first && row.every(c => !String(c || "").trim())) continue;
+        if (/^TOTAL/i.test(first)) continue;
+
+        const looksLikeGroup = /\(\s*[\d.]+\s*만\s*\)/.test(first) || /youtube\.com\//.test(first) || /@[\w_-]+/.test(first);
+        const hasContentLink = col["콘텐츠 링크"] !== undefined && row[col["콘텐츠 링크"]] && String(row[col["콘텐츠 링크"]]).trim();
+        const hasStoreLink   = col["매장 링크"] !== undefined && row[col["매장 링크"]] && String(row[col["매장 링크"]]).trim();
+        const hasStore       = col["매장"] !== undefined && row[col["매장"]] && String(row[col["매장"]]).trim();
+
+        if (looksLikeGroup && !hasContentLink && !hasStoreLink && !hasStore) {
+          const m = first.match(/^([^(（]+?)\s*[\(（]\s*([\d.]+)\s*만\s*[\)）]/);
+          const name = m ? m[1].trim() : first.split(/\s+/)[0].replace(/\(.*\)/g, "").trim();
+          const subs = m ? m[2] + "만" : "";
+          const urlMatch = first.match(/https?:\/\/[^\s]+/);
+          currentInfluencer = { name, subscribers: subs, channelUrl: urlMatch ? urlMatch[0] : "" };
+          continue;
+        }
+
+        if (!hasStore && !hasContentLink && !hasStoreLink) continue;
+
+        const get = (k) => col[k] !== undefined ? row[col[k]] : undefined;
+        const contentUrl = String(get("콘텐츠 링크") || "").trim();
+
+        items.push({
+          influencer: currentInfluencer?.name || "(미지정)",
+          influencerSubs: currentInfluencer?.subscribers || "",
+          influencerChannelUrl: currentInfluencer?.channelUrl || "",
+          insertDate:   String(get("링크삽입일") || "").trim(),
+          publishDate:  String(get("콘텐츠 발행일") || "").trim(),
+          trackingDate: String(get("트래킹 완료일") || "").trim(),
+          channel:      String(get("매체") || "").trim(),
+          store:        String(get("매장") || "").trim(),
+          contentUrl,
+          storeUrl:     String(get("매장 링크") || "").trim(),
+          sheetViews:    parseSheetNumber(get("조회")),
+          sheetLikes:    parseSheetNumber(get("좋아요")),
+          sheetComments: parseSheetNumber(get("댓글")),
+          clicks:        parseSheetNumber(get("클릭 유저")),
+          cpc:           parseSheetNumber(get("클릭 유저당 비용")),
+          incentive:     parseSheetNumber(get("인센티브")),
+          partnerFee:    parseSheetNumber(get("제휴 비용")),
+          totalCost:     parseSheetNumber(get("총 비용")),
+          reservations:  parseSheetNumber(get("예약 발생(dining)") ?? get("예약 발생")),
+          apiViews: null, apiLikes: null, apiComments: null,
+          title: "", thumb: "",
+          videoId: extractVideoId(contentUrl),
+        });
+      }
+
+      return { items, headerIdx };
+    }
+
+    // ---- YouTube 배치 ----
+    async function fetchYoutubeBatch(videoIds, apiKey) {
+      if (!videoIds || videoIds.length === 0) return {};
+      const chunks = [];
+      for (let i = 0; i < videoIds.length; i += 50) chunks.push(videoIds.slice(i, i + 50));
+      const map = {};
+      for (const chunk of chunks) {
+        const ep = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${chunk.join(",")}&key=${encodeURIComponent(apiKey)}`;
+        const res = await fetch(ep);
+        const json = await res.json();
+        if (!res.ok) throw new Error(json?.error?.message || `YouTube API HTTP ${res.status}`);
+        (json.items || []).forEach(v => { map[v.id] = v; });
+      }
+      return map;
+    }
+
+    // ---- Sheets API ----
+    async function fetchSheetMeta(sheetId, accessToken) {
+      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets(properties(sheetId,title))`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error?.message || `Sheets meta HTTP ${res.status}`);
+      return json;
+    }
+    async function fetchSheetValues(sheetId, sheetTitle, accessToken) {
+      const range = encodeURIComponent(`${sheetTitle}!A1:Z500`);
+      const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/${range}?valueRenderOption=UNFORMATTED_VALUE`, {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error?.message || `Sheets values HTTP ${res.status}`);
+      return json.values || [];
+    }
+
+    // ---- 컴포넌트 ----
+    function KpiCard({ icon: IconComp, label, value, accent, subtitle }) {
+      return (
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5">
+          <div className="flex items-center justify-between mb-3">
+            <span className={`inline-flex items-center justify-center w-9 h-9 rounded-xl ${accent}`}>
+              <IconComp className="w-5 h-5 text-white" />
+            </span>
+            <span className="text-xs font-medium text-gray-500">{label}</span>
+          </div>
+          <div className="text-2xl font-bold text-gray-900 tabular-nums">{value}</div>
+          {subtitle && <div className="mt-1 text-xs text-gray-500">{subtitle}</div>}
+        </div>
+      );
+    }
+
+    function InfluencerCard({ group, appsScriptUrl }) {
+      const [copied, setCopied] = useState(false);
+      const clickRate = group.totalViews ? (group.totalClicks / group.totalViews * 100) : 0;
+      const reservationRate = group.totalClicks ? (group.totalReservations / group.totalClicks * 100) : 0;
+      const copyShareLink = async () => {
+        const shareUrl = buildInfluencerShareUrl(group.name, appsScriptUrl);
+        try {
+          await navigator.clipboard.writeText(shareUrl);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        } catch(e) {
+          // 폴백: prompt로 표시
+          window.prompt("아래 URL을 복사해 인플루언서에게 전달하세요:", shareUrl);
+        }
+      };
+      return (
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5">
+          <div className="flex items-baseline justify-between mb-3">
+            <div>
+              <h4 className="text-base font-bold text-gray-900">{group.name}</h4>
+              <p className="text-xs text-gray-500">{group.subscribers && `구독자 ${group.subscribers}`} · 콘텐츠 {group.items.length}개</p>
+            </div>
+            {group.channelUrl && (
+              <a href={group.channelUrl} target="_blank" rel="noreferrer"
+                 className="text-xs font-medium text-indigo-600 hover:underline">채널 →</a>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-xs text-gray-500">총 조회</div>
+              <div className="font-bold text-gray-900 tabular-nums">{formatNumber(group.totalViews)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">총 클릭</div>
+              <div className="font-bold text-indigo-700 tabular-nums">{formatNumber(group.totalClicks)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">인센티브</div>
+              <div className="font-bold text-rose-700 tabular-nums">{formatKRW(group.totalIncentive)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">예약</div>
+              <div className="font-bold text-emerald-700 tabular-nums">{formatNumber(group.totalReservations)}건</div>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between text-xs text-gray-600">
+            <span>클릭률 <b className="text-gray-900 tabular-nums">{clickRate.toFixed(2)}%</b></span>
+            <span>예약 전환 <b className="text-gray-900 tabular-nums">{reservationRate.toFixed(1)}%</b></span>
+          </div>
+          <button onClick={copyShareLink}
+                  className={`mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border transition
+                    ${copied
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                      : "bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100"}`}>
+            {copied
+              ? <><CheckIcon className="w-3.5 h-3.5" /> 링크가 복사됐어요</>
+              : <><UserIcon className="w-3.5 h-3.5" /> 인플루언서 정산 링크 복사</>}
+          </button>
+        </div>
+      );
+    }
+
+    function RankingList({ title, icon: IconComp, accent, items, valueKey, valueLabel, formatFn }) {
+      const sorted = [...items]
+        .filter(x => Number(x[valueKey]) > 0)
+        .sort((a,b) => Number(b[valueKey]) - Number(a[valueKey]))
+        .slice(0, 5);
+      return (
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${accent}`}>
+              <IconComp className="w-4 h-4 text-white" />
+            </span>
+            <h3 className="text-sm font-bold text-gray-900">{title}</h3>
+          </div>
+          {sorted.length === 0 ? (
+            <p className="text-xs text-gray-500">데이터가 없습니다.</p>
+          ) : (
+            <ol className="space-y-2">
+              {sorted.map((it, i) => {
+                const rankColor = ["bg-amber-400","bg-gray-400","bg-orange-500","bg-indigo-400","bg-indigo-300"][i] || "bg-gray-300";
+                return (
+                  <li key={i} className="flex items-center gap-2 text-sm">
+                    <span className={`flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-md text-white text-xs font-bold ${rankColor}`}>{i+1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-semibold text-gray-900 truncate">{it.store || "(매장 미지정)"}</div>
+                      <div className="text-xs text-gray-500 truncate">{it.influencer} · {it.channel}</div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-bold tabular-nums">{formatFn ? formatFn(it[valueKey]) : formatNumber(it[valueKey])}</div>
+                      <div className="text-xs text-gray-400">{valueLabel}</div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      );
+    }
+
+    function exportToExcel(items) {
+      if (typeof XLSX === "undefined") { alert("엑셀 라이브러리를 불러오지 못했습니다."); return; }
+      const rows = items.map(it => {
+        const views = it.apiViews !== null ? it.apiViews : it.sheetViews;
+        const likes = it.apiLikes !== null ? it.apiLikes : it.sheetLikes;
+        const comments = it.apiComments !== null ? it.apiComments : it.sheetComments;
+        return {
+          "인플루언서": it.influencer,
+          "매체": it.channel,
+          "매장": it.store,
+          "콘텐츠 링크": it.contentUrl,
+          "매장 링크": it.storeUrl,
+          "링크 삽입일": it.insertDate,
+          "콘텐츠 발행일": it.publishDate,
+          "트래킹 완료일": it.trackingDate,
+          "조회": views || 0,
+          "좋아요": likes || 0,
+          "댓글": comments || 0,
+          "클릭": it.clicks,
+          "인센티브(원)": it.incentive,
+          "예약(건)": it.reservations,
+          "CPC": it.clicks ? Math.round(it.incentive / it.clicks) : 0,
+          "클릭률(%)": views ? Number((it.clicks / views * 100).toFixed(3)) : 0,
+          "예약 전환율(%)": it.clicks ? Number((it.reservations / it.clicks * 100).toFixed(2)) : 0,
+        };
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      ws["!cols"] = [
+        { wch: 14 },{ wch: 8 },{ wch: 22 },{ wch: 40 },{ wch: 32 },
+        { wch: 12 },{ wch: 12 },{ wch: 12 },{ wch: 10 },{ wch: 10 },
+        { wch: 10 },{ wch: 10 },{ wch: 12 },{ wch: 10 },{ wch: 8 },
+        { wch: 10 },{ wch: 12 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "미식 파트너스");
+      const now = new Date();
+      const pad = n => String(n).padStart(2,"0");
+      const fname = `catchtable-partners-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
+      XLSX.writeFile(wb, fname);
+    }
+
+    // ---- 인플루언서 전용 뷰 ----
+    function InfluencerView({ influencerName, apiUrl }) {
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState("");
+      const [items, setItems] = useState([]);
+      const [influencerMeta, setInfluencerMeta] = useState({ subscribers: "", channelUrl: "" });
+      const [fetchedAt, setFetchedAt] = useState(null);
+
+      // 정산 모달 상태
+      const [confirmOpen, setConfirmOpen] = useState(false);
+      const [submitting, setSubmitting] = useState(false);
+      const [resultOpen, setResultOpen] = useState(false);
+      const [resultPayload, setResultPayload] = useState(null);
+      const [submitError, setSubmitError] = useState("");
+
+      // 정산 로그 (로컬)
+      const [localLog, setLocalLog] = useState([]);
+
+      useEffect(() => {
+        try {
+          const raw = localStorage.getItem(KEY_PAYOUT_LOG);
+          const arr = raw ? JSON.parse(raw) : [];
+          setLocalLog(arr.filter(x => x.influencer === influencerName));
+        } catch(e) {}
+      }, [influencerName]);
+
+      const load = async () => {
+        setLoading(true); setError("");
+        try {
+          const data = await fetchInfluencerDataFromAppsScript(apiUrl, influencerName);
+          const rows = data.rows || [];
+          const { items: parsed, error: parseErr } = parseSheetRows(rows);
+          if (parseErr) throw new Error(parseErr);
+          const my = parsed.filter(it => it.influencer === influencerName);
+          if (my.length === 0) {
+            setError(`'${influencerName}' 이름으로 등록된 콘텐츠를 찾지 못했어요. 담당자에게 링크가 맞는지 확인해 주세요.`);
+          }
+          setItems(my);
+          if (my[0]) {
+            setInfluencerMeta({
+              subscribers: my[0].influencerSubs || "",
+              channelUrl:  my[0].influencerChannelUrl || "",
+            });
+          }
+          setFetchedAt(new Date());
+        } catch(e) {
+          setError(`데이터 불러오기 실패: ${e.message}`);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => {
+        if (!apiUrl) {
+          setLoading(false);
+          setError("이 링크는 Apps Script URL이 없어 데이터를 불러올 수 없어요. 담당자(sangho.park@catchtable.co.kr)에게 문의해 주세요.");
+          return;
+        }
+        load();
+      }, []);
+
+      const totals = useMemo(() => {
+        const totalClicks = items.reduce((a,it) => a + it.clicks, 0);
+        const totalIncentive = items.reduce((a,it) => a + it.incentive, 0);
+        const totalViews = items.reduce((a,it) => a + (it.apiViews !== null ? it.apiViews : it.sheetViews), 0);
+        return { totalClicks, totalIncentive, totalViews, videoCount: items.length };
+      }, [items]);
+
+      const payoutDate = useMemo(() => calculatePayoutDate(new Date()), []);
+
+      const submitPayout = async () => {
+        setSubmitting(true); setSubmitError("");
+        try {
+          const payload = {
+            action: "payout",
+            influencer: influencerName,
+            amount: totals.totalIncentive,
+            videoCount: totals.videoCount,
+            clickCount: totals.totalClicks,
+            clickedAt: new Date().toISOString(),
+            payoutDate: payoutDate.toISOString(),
+          };
+          const resp = await postPayoutToAppsScript(apiUrl, payload);
+          const record = {
+            ...payload,
+            appsScriptResponse: resp,
+            loggedAt: new Date().toISOString(),
+          };
+          // 로컬 로그 저장
+          try {
+            const raw = localStorage.getItem(KEY_PAYOUT_LOG);
+            const arr = raw ? JSON.parse(raw) : [];
+            arr.push(record);
+            localStorage.setItem(KEY_PAYOUT_LOG, JSON.stringify(arr));
+            setLocalLog(arr.filter(x => x.influencer === influencerName));
+          } catch(e) {}
+          setResultPayload(record);
+          setConfirmOpen(false);
+          setResultOpen(true);
+        } catch(e) {
+          setSubmitError(`정산 요청 실패: ${e.message}`);
+        } finally {
+          setSubmitting(false);
+        }
+      };
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-indigo-50 p-6">
+          <div className="max-w-5xl mx-auto">
+            <header className="flex items-center gap-3 mb-6">
+              <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-indigo-600">
+                <UserIcon className="w-6 h-6 text-white" />
+              </span>
+              <div className="flex-1">
+                <h1 className="text-2xl font-bold text-gray-900">{influencerName}님의 정산 대시보드</h1>
+                <p className="text-sm text-gray-500">
+                  캐치테이블 미식 파트너스 · 영상 클릭당 {DEFAULT_INCENTIVE}원 인센티브
+                  {influencerMeta.subscribers && ` · 구독자 ${influencerMeta.subscribers}`}
+                </p>
+              </div>
+              {fetchedAt && (
+                <button onClick={load}
+                        className="text-xs text-gray-500 hover:text-indigo-600 inline-flex items-center gap-1">
+                  <RefreshIcon className="w-4 h-4" /> 새로고침
+                </button>
+              )}
+            </header>
+
+            {loading && (
+              <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
+                <LoaderIcon className="w-8 h-8 text-indigo-500 animate-spin mx-auto mb-3" />
+                <p className="text-sm text-gray-600">데이터를 불러오는 중이에요…</p>
+              </div>
+            )}
+
+            {error && (
+              <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <AlertIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold">문제가 발생했어요</div>
+                  <div>{error}</div>
+                </div>
+              </div>
+            )}
+
+            {!loading && !error && items.length > 0 && (
+              <>
+                {/* 메인 정산 카드 */}
+                <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl p-8 mb-6">
+                  <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+                    <div>
+                      <p className="text-sm text-indigo-200 mb-1">정산 받을 금액</p>
+                      <p className="text-5xl font-bold tabular-nums">{formatKRW(totals.totalIncentive)}</p>
+                      <p className="text-sm text-indigo-200 mt-2">
+                        콘텐츠 {totals.videoCount}개 · 총 클릭 {formatNumber(totals.totalClicks)}회
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-indigo-200 mb-1">지금 신청 시 지급 예정일</p>
+                      <p className="text-xl font-semibold">{formatDateKR(payoutDate)}</p>
+                      <button
+                        onClick={() => setConfirmOpen(true)}
+                        disabled={totals.totalIncentive <= 0}
+                        className="mt-4 inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg"
+                      >
+                        <MoneyIcon className="w-5 h-5" /> 정산 받기
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 정산 로그 */}
+                {localLog.length > 0 && (
+                  <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+                    <h3 className="text-sm font-bold text-emerald-900 mb-2 flex items-center gap-2">
+                      <CheckIcon className="w-4 h-4" /> 최근 정산 요청 내역
+                    </h3>
+                    <ul className="space-y-1 text-xs text-emerald-900">
+                      {localLog.slice().reverse().slice(0, 5).map((r, i) => (
+                        <li key={i} className="flex justify-between">
+                          <span>{new Date(r.clickedAt).toLocaleString("ko-KR")} 신청</span>
+                          <span className="font-semibold">{formatKRW(r.amount)} · 지급일 {formatDateKR(r.payoutDate)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* 영상별 상세 */}
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
+                  <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
+                    <TableIcon className="w-5 h-5 text-gray-500" /> 콘텐츠별 성과
+                  </h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-500 border-b border-gray-200">
+                          <th className="text-left py-2 px-2">매장</th>
+                          <th className="text-left py-2 px-2">매체</th>
+                          <th className="text-left py-2 px-2">발행일</th>
+                          <th className="text-right py-2 px-2">조회</th>
+                          <th className="text-right py-2 px-2">클릭</th>
+                          <th className="text-right py-2 px-2">인센티브</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {items.map((it, idx) => {
+                          const views = it.apiViews !== null ? it.apiViews : it.sheetViews;
+                          return (
+                            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-2 px-2">
+                                {it.contentUrl ? (
+                                  <a href={it.contentUrl} target="_blank" rel="noreferrer"
+                                     className="text-gray-900 font-medium hover:text-indigo-600">
+                                    {it.store}
+                                  </a>
+                                ) : <span>{it.store}</span>}
+                              </td>
+                              <td className="py-2 px-2 text-gray-600">{it.channel}</td>
+                              <td className="py-2 px-2 text-gray-500 text-xs">{it.publishDate}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-gray-800">{formatNumber(views)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-sky-700 font-semibold">{formatNumber(it.clicks)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-rose-700 font-semibold">{formatKRW(it.incentive)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot>
+                        <tr className="border-t-2 border-gray-300 bg-gray-50">
+                          <td className="py-2 px-2 font-bold" colSpan="3">합계</td>
+                          <td className="py-2 px-2 text-right tabular-nums font-bold">{formatNumber(totals.totalViews)}</td>
+                          <td className="py-2 px-2 text-right tabular-nums font-bold text-sky-700">{formatNumber(totals.totalClicks)}</td>
+                          <td className="py-2 px-2 text-right tabular-nums font-bold text-rose-700">{formatKRW(totals.totalIncentive)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+
+                {/* 정산 주기 안내 */}
+                <div className="rounded-2xl border border-gray-200 bg-white p-5 text-xs text-gray-600">
+                  <h4 className="text-sm font-bold text-gray-900 mb-2">정산 주기 안내</h4>
+                  <ul className="space-y-1 list-disc list-inside">
+                    <li>매월 <b>둘째주 수요일 ~ 월말일</b>에 신청 → <b>익월 둘째주 수요일</b> 지급</li>
+                    <li>매월 <b>월말일 ~ 익월 둘째주 수요일</b>에 신청 → <b>익월 말일</b> 지급</li>
+                    <li>지급 예정일은 신청 시점을 기준으로 자동 계산됩니다.</li>
+                  </ul>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* 확인 모달 */}
+          {confirmOpen && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-3">정산 신청 확인</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  아래 금액으로 정산 요청을 접수할까요?
+                  요청 내역은 담당자({"sangho.park@catchtable.co.kr"})에게 메일로 전달돼요.
+                </p>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4 space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-500">인플루언서</span><span className="font-semibold">{influencerName}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">콘텐츠 수</span><span className="font-semibold">{totals.videoCount}개</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">총 클릭</span><span className="font-semibold">{formatNumber(totals.totalClicks)}회</span></div>
+                  <div className="flex justify-between border-t pt-2 mt-2"><span className="text-gray-700">정산 금액</span><span className="font-bold text-rose-700 text-lg">{formatKRW(totals.totalIncentive)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">지급 예정일</span><span className="font-semibold">{formatDateKR(payoutDate)}</span></div>
+                </div>
+                {submitError && (
+                  <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">{submitError}</div>
+                )}
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setConfirmOpen(false)} disabled={submitting}
+                          className="px-4 py-2 rounded-xl border border-gray-300 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50">
+                    취소
+                  </button>
+                  <button onClick={submitPayout} disabled={submitting}
+                          className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 inline-flex items-center gap-1.5">
+                    {submitting ? <><LoaderIcon className="w-4 h-4 animate-spin" /> 요청 중…</> : <>정산 신청</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 결과 모달 */}
+          {resultOpen && resultPayload && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center">
+                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4">
+                  <CheckIcon className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">정산 신청이 접수됐어요!</h3>
+                <p className="text-sm text-gray-600 mb-5">
+                  담당자 메일로 자동 전달됐고, 아래 일정에 맞춰 지급돼요.
+                </p>
+                <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-4 mb-5 text-left space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-600">신청 금액</span><span className="font-bold text-rose-700">{formatKRW(resultPayload.amount)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">지급 예정일</span><span className="font-bold text-indigo-700">{formatDateKR(resultPayload.payoutDate)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">신청 일시</span><span className="text-gray-800">{new Date(resultPayload.clickedAt).toLocaleString("ko-KR")}</span></div>
+                </div>
+                <button onClick={() => setResultOpen(false)}
+                        className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700">
+                  확인
+                </button>
+              </div>
+            </div>
+          )}
+
+          <footer className="mt-8 text-center text-xs text-gray-400">
+            문의: sangho.park@catchtable.co.kr
+          </footer>
+        </div>
+      );
+    }
+
+    // ---- 메인 ----
+    function App() {
+      const [clientId, setClientId] = useState("");
+      const [ytApiKey, setYtApiKey] = useState("");
+      const [sheetId, setSheetId] = useState(DEFAULT_SHEET_ID);
+      const [sheetGid, setSheetGid] = useState(DEFAULT_SHEET_GID);
+      const [appsScriptUrl, setAppsScriptUrl] = useState("");
+      const [incentivePerClick, setIncentivePerClick] = useState(DEFAULT_INCENTIVE);
+
+      const [accessToken, setAccessToken] = useState(null);
+      const [tokenExpiry, setTokenExpiry] = useState(0);
+      const [userEmail, setUserEmail] = useState("");
+
+      const [loading, setLoading] = useState(false);
+      const [status, setStatus] = useState("");
+      const [error, setError] = useState("");
+      const [items, setItems] = useState([]);
+      const [lastFetched, setLastFetched] = useState(null);
+
+      const tokenClientRef = useRef(null);
+      const [gisReady, setGisReady] = useState(
+        typeof window !== "undefined" && !!window.google?.accounts?.oauth2
+      );
+
+      const [configLoaded, setConfigLoaded] = useState(false);
+      const [configCollapsed, setConfigCollapsed] = useState(false);
+
+      useEffect(() => {
+        try {
+          setClientId(localStorage.getItem(KEY_CLIENT_ID) || DEFAULT_CLIENT_ID);
+          setYtApiKey(localStorage.getItem(KEY_YT_API_KEY) || DEFAULT_YT_API_KEY);
+          setSheetId(localStorage.getItem(KEY_SHEET_ID) || DEFAULT_SHEET_ID);
+          setSheetGid(localStorage.getItem(KEY_SHEET_GID) || DEFAULT_SHEET_GID);
+          setAppsScriptUrl(localStorage.getItem(KEY_APPS_SCRIPT_URL) || DEFAULT_APPS_SCRIPT_URL);
+          const savedInc = localStorage.getItem(KEY_INCENTIVE);
+          if (savedInc) setIncentivePerClick(Number(savedInc) || DEFAULT_INCENTIVE);
+        } catch(e) {}
+        setConfigLoaded(true);
+      }, []);
+
+      // 설정값 자동 저장 — 타이핑/붙여넣기 즉시 localStorage 반영
+      useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_CLIENT_ID, clientId); } catch(e) {} } }, [clientId, configLoaded]);
+      useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_YT_API_KEY, ytApiKey); } catch(e) {} } }, [ytApiKey, configLoaded]);
+      useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_SHEET_ID, sheetId); } catch(e) {} } }, [sheetId, configLoaded]);
+      useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_SHEET_GID, sheetGid); } catch(e) {} } }, [sheetGid, configLoaded]);
+      useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_APPS_SCRIPT_URL, appsScriptUrl); } catch(e) {} } }, [appsScriptUrl, configLoaded]);
+      useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_INCENTIVE, String(incentivePerClick)); } catch(e) {} } }, [incentivePerClick, configLoaded]);
+
+      // GIS(Google Identity Services) 라이브러리 로드 폴링 — async/defer 로 인한 레이스 컨디션 방지
+      useEffect(() => {
+        if (gisReady) return;
+        let timer = null;
+        const check = () => {
+          if (window.google?.accounts?.oauth2) {
+            setGisReady(true);
+          } else {
+            timer = setTimeout(check, 200);
+          }
+        };
+        check();
+        return () => { if (timer) clearTimeout(timer); };
+      }, [gisReady]);
+
+      const initTokenClient = () => {
+        if (!clientId) return false;
+        if (!window.google?.accounts?.oauth2) return false;
+        try {
+          tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email",
+            callback: (resp) => {
+              if (resp.error) {
+                setError(`구글 인증 실패: ${resp.error_description || resp.error}`);
+                return;
+              }
+              setAccessToken(resp.access_token);
+              setTokenExpiry(Date.now() + (resp.expires_in || 3600) * 1000);
+              fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+                headers: { Authorization: `Bearer ${resp.access_token}` }
+              }).then(r => r.json()).then(j => setUserEmail(j.email || ""));
+            },
+          });
+          return true;
+        } catch(e) {
+          console.error(e);
+          return false;
+        }
+      };
+
+      useEffect(() => {
+        if (!gisReady || !clientId) return;
+        initTokenClient();
+      }, [clientId, gisReady]);
+
+      const signIn = () => {
+        if (!clientId) { setError("Google OAuth 클라이언트 ID를 먼저 입력해주세요."); return; }
+        // 혹시 아직 초기화가 안 됐다면 즉석에서 한 번 더 시도
+        if (!tokenClientRef.current) {
+          if (!window.google?.accounts?.oauth2) {
+            setError("구글 인증 라이브러리(gsi/client)가 아직 로드되지 않았어요. 인터넷 연결과 광고 차단 확장 프로그램을 확인하고, 현재 주소가 http://localhost:... 인지 확인해 주세요. (file:// 로 열면 차단됩니다.)");
+            return;
+          }
+          if (!initTokenClient()) {
+            setError("구글 인증 클라이언트 초기화에 실패했어요. 클라이언트 ID를 다시 확인해 주세요.");
+            return;
+          }
+        }
+        setError("");
+        try { localStorage.setItem(KEY_CLIENT_ID, clientId); } catch(e) {}
+        tokenClientRef.current.requestAccessToken();
+      };
+
+      const signOut = () => {
+        if (accessToken && window.google?.accounts?.oauth2) {
+          window.google.accounts.oauth2.revoke(accessToken, () => {});
+        }
+        setAccessToken(null); setTokenExpiry(0); setUserEmail(""); setItems([]);
+      };
+
+      const loadData = async () => {
+        setError(""); setStatus("");
+        if (!accessToken) { setError("먼저 구글 로그인을 해주세요."); return; }
+        if (!sheetId) { setError("스프레드시트 ID를 입력해주세요."); return; }
+        if (!ytApiKey) { setError("YouTube API 키를 입력해주세요."); return; }
+
+        setLoading(true);
+        try {
+          setStatus("스프레드시트 메타데이터 조회 중…");
+          const meta = await fetchSheetMeta(sheetId, accessToken);
+          const targetSheet = meta.sheets.find(s => String(s.properties.sheetId) === String(sheetGid));
+          const sheetTitle = targetSheet ? targetSheet.properties.title : meta.sheets[0].properties.title;
+
+          setStatus(`'${sheetTitle}' 탭에서 데이터 가져오는 중…`);
+          const values = await fetchSheetValues(sheetId, sheetTitle, accessToken);
+
+          const { items: parsed, error: parseErr } = parseSheetRows(values);
+          if (parseErr) { setError(parseErr); setLoading(false); return; }
+
+          setStatus(`${parsed.length}개 콘텐츠 파싱 완료. YouTube 지표 조회 중…`);
+
+          const videoIds = [...new Set(parsed.map(it => it.videoId).filter(Boolean))];
+          let ytMap = {};
+          if (videoIds.length > 0) {
+            try { ytMap = await fetchYoutubeBatch(videoIds, ytApiKey); }
+            catch(e) { setError(`YouTube API 조회 실패: ${e.message}`); }
+          }
+
+          const enriched = parsed.map(it => {
+            if (it.videoId && ytMap[it.videoId]) {
+              const v = ytMap[it.videoId];
+              return {
+                ...it,
+                apiViews: Number(v.statistics?.viewCount || 0),
+                apiLikes: Number(v.statistics?.likeCount || 0),
+                apiComments: Number(v.statistics?.commentCount || 0),
+                title: v.snippet?.title || "",
+                thumb: v.snippet?.thumbnails?.default?.url || "",
+              };
+            }
+            return it;
+          });
+
+          setItems(enriched);
+          setLastFetched(new Date());
+          setStatus(`완료 — 콘텐츠 ${enriched.length}개, YouTube 수치 ${Object.keys(ytMap).length}개 수집`);
+
+          try {
+            localStorage.setItem(KEY_CLIENT_ID, clientId);
+            localStorage.setItem(KEY_YT_API_KEY, ytApiKey);
+            localStorage.setItem(KEY_SHEET_ID, sheetId);
+            localStorage.setItem(KEY_SHEET_GID, sheetGid);
+            localStorage.setItem(KEY_APPS_SCRIPT_URL, appsScriptUrl);
+            localStorage.setItem(KEY_INCENTIVE, String(incentivePerClick));
+          } catch(e) {}
+        } catch(e) {
+          setError(`데이터 불러오기 실패: ${e.message}`);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const summary = useMemo(() => {
+        if (items.length === 0) return null;
+        const totalViews = items.reduce((a,it) => a + (it.apiViews !== null ? it.apiViews : it.sheetViews), 0);
+        const totalLikes = items.reduce((a,it) => a + (it.apiLikes !== null ? it.apiLikes : it.sheetLikes), 0);
+        const totalComments = items.reduce((a,it) => a + (it.apiComments !== null ? it.apiComments : it.sheetComments), 0);
+        const totalClicks = items.reduce((a,it) => a + it.clicks, 0);
+        const totalIncentive = items.reduce((a,it) => a + it.incentive, 0);
+        const totalReservations = items.reduce((a,it) => a + it.reservations, 0);
+        const totalPartnerFee = items.reduce((a,it) => a + it.partnerFee, 0);
+        return {
+          count: items.length,
+          totalViews, totalLikes, totalComments,
+          totalClicks, totalIncentive, totalReservations, totalPartnerFee,
+          totalCost: totalIncentive + totalPartnerFee,
+          avgCpc: totalClicks ? totalIncentive / totalClicks : 0,
+          clickRate: totalViews ? (totalClicks / totalViews * 100) : 0,
+          reservationRate: totalClicks ? (totalReservations / totalClicks * 100) : 0,
+        };
+      }, [items]);
+
+      const influencerGroups = useMemo(() => {
+        const map = new Map();
+        items.forEach(it => {
+          const key = it.influencer || "(미지정)";
+          if (!map.has(key)) {
+            map.set(key, {
+              name: key,
+              subscribers: it.influencerSubs,
+              channelUrl: it.influencerChannelUrl,
+              items: [],
+              totalViews: 0, totalLikes: 0, totalComments: 0,
+              totalClicks: 0, totalIncentive: 0, totalReservations: 0,
+            });
+          }
+          const g = map.get(key);
+          g.items.push(it);
+          g.totalViews += (it.apiViews !== null ? it.apiViews : it.sheetViews);
+          g.totalLikes += (it.apiLikes !== null ? it.apiLikes : it.sheetLikes);
+          g.totalComments += (it.apiComments !== null ? it.apiComments : it.sheetComments);
+          g.totalClicks += it.clicks;
+          g.totalIncentive += it.incentive;
+          g.totalReservations += it.reservations;
+        });
+        return Array.from(map.values()).sort((a,b) => b.totalClicks - a.totalClicks);
+      }, [items]);
+
+      const [sortKey, setSortKey] = useState("clicks");
+      const [sortDir, setSortDir] = useState("desc");
+      const sortedItems = useMemo(() => {
+        const getVal = (it, k) => {
+          if (k === "views") return it.apiViews !== null ? it.apiViews : it.sheetViews;
+          if (k === "likes") return it.apiLikes !== null ? it.apiLikes : it.sheetLikes;
+          if (k === "comments") return it.apiComments !== null ? it.apiComments : it.sheetComments;
+          return it[k] || 0;
+        };
+        return [...items].sort((a,b) => {
+          const diff = Number(getVal(b, sortKey)) - Number(getVal(a, sortKey));
+          return sortDir === "desc" ? diff : -diff;
+        });
+      }, [items, sortKey, sortDir]);
+      const toggleSort = (k) => {
+        if (sortKey === k) setSortDir(d => d === "desc" ? "asc" : "desc");
+        else { setSortKey(k); setSortDir("desc"); }
+      };
+      const ThSort = ({ k, label }) => (
+        <th className="py-2 px-2 text-right cursor-pointer hover:text-indigo-600" onClick={() => toggleSort(k)}>
+          {label}{sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
+        </th>
+      );
+
+      const isLoggedIn = !!accessToken && Date.now() < tokenExpiry;
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-indigo-50 p-6">
+          <div className="max-w-7xl mx-auto">
+            <header className="flex items-center gap-3 mb-6">
+              <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-indigo-600">
+                <TableIcon className="w-6 h-6 text-white" />
+              </span>
+              <div className="flex-1">
+                <h1 className="text-2xl font-bold text-gray-900">캐치테이블 미식 파트너스 대시보드</h1>
+                <p className="text-sm text-gray-500">인플루언서 맛집 리뷰 링크 삽입 성과 — 조회/좋아요/댓글 + 클릭 + 인센티브</p>
+              </div>
+              {isLoggedIn && (
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <span className="inline-flex items-center gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full px-2 py-1">
+                    <CheckIcon className="w-3 h-3" /> 로그인됨 {userEmail && `· ${userEmail}`}
+                  </span>
+                  <button onClick={signOut} className="inline-flex items-center gap-1 text-gray-500 hover:text-red-600">
+                    <LogoutIcon className="w-4 h-4" /> 로그아웃
+                  </button>
+                </div>
+              )}
+            </header>
+
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-gray-900">연동 설정</h2>
+                  <span className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5 inline-flex items-center gap-1">
+                    <CheckIcon className="w-3 h-3" /> 자동 저장
+                  </span>
+                </div>
+                <button onClick={() => setConfigCollapsed(v => !v)}
+                        className="text-xs text-gray-500 hover:text-indigo-600">
+                  {configCollapsed ? "설정 펼치기" : "설정 접기"}
+                </button>
+              </div>
+              {!configCollapsed && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                    <GoogleIcon className="w-4 h-4" /> Google OAuth 클라이언트 ID
+                  </label>
+                  <input type="text" value={clientId} onChange={e=>setClientId(e.target.value)}
+                         placeholder="xxxxx.apps.googleusercontent.com"
+                         className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                    <KeyIcon className="w-4 h-4" /> YouTube Data API v3 키
+                  </label>
+                  <input type="password" value={ytApiKey} onChange={e=>setYtApiKey(e.target.value)}
+                         placeholder="AIzaSy..."
+                         className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                    <SheetIcon className="w-4 h-4" /> 스프레드시트 ID
+                  </label>
+                  <input type="text" value={sheetId} onChange={e=>setSheetId(e.target.value)}
+                         className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                    <SheetIcon className="w-4 h-4" /> 시트 탭 GID
+                  </label>
+                  <input type="text" value={sheetGid} onChange={e=>setSheetGid(e.target.value)}
+                         className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                    <MoneyIcon className="w-4 h-4" /> Apps Script 웹앱 URL <span className="text-xs font-normal text-gray-400">(인플루언서 정산 링크용)</span>
+                  </label>
+                  <input type="text" value={appsScriptUrl} onChange={e=>setAppsScriptUrl(e.target.value)}
+                         placeholder="https://script.google.com/macros/s/.../exec"
+                         className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                </div>
+              </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {!isLoggedIn ? (
+                  <button onClick={signIn}
+                          className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-white border border-gray-300 text-sm font-semibold hover:bg-gray-50">
+                    <GoogleIcon className="w-4 h-4" /> 구글 로그인
+                  </button>
+                ) : (
+                  <button onClick={loadData} disabled={loading}
+                          className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60">
+                    {loading ? (<><LoaderIcon className="w-4 h-4 animate-spin" /> 불러오는 중</>) :
+                               (<><RefreshIcon className="w-4 h-4" /> 데이터 새로 불러오기</>)}
+                  </button>
+                )}
+                {lastFetched && (
+                  <span className="text-xs text-gray-500">마지막 업데이트: {lastFetched.toLocaleString("ko-KR")}</span>
+                )}
+                {items.length > 0 && (
+                  <button onClick={() => exportToExcel(items)}
+                          className="ml-auto inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100">
+                    <DownloadIcon className="w-4 h-4" /> 엑셀 다운로드
+                  </button>
+                )}
+              </div>
+              {status && <p className="mt-2 text-xs text-gray-500">{status}</p>}
+            </div>
+
+            {error && (
+              <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <AlertIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold">문제가 발생했어요</div>
+                  <div>{error}</div>
+                </div>
+              </div>
+            )}
+
+            {!isLoggedIn && !items.length && !error && (
+              <div className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
+                <h3 className="font-bold mb-2">처음 사용 안내</h3>
+                <ol className="list-decimal list-inside space-y-1 text-xs leading-relaxed">
+                  <li>Google Cloud Console에서 <b>OAuth 2.0 클라이언트 ID</b>를 '웹 애플리케이션'으로 발급 → 승인된 JavaScript 원본에 <code>http://localhost:8000</code>(혹은 띄울 포트) 등록</li>
+                  <li>같은 프로젝트에서 <b>Google Sheets API</b>와 <b>YouTube Data API v3</b>를 '사용 설정'</li>
+                  <li>이 HTML은 <code>file://</code>에서는 OAuth가 동작하지 않아요. 폴더에서 <code>python -m http.server 8000</code> 로 띄우고 <code>http://localhost:8000/…</code>로 접속해 주세요.</li>
+                  <li>클라이언트 ID, YouTube API 키 입력 후 [구글 로그인] → [데이터 새로 불러오기]</li>
+                </ol>
+              </div>
+            )}
+
+            {summary && (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
+                  <KpiCard icon={EyeIcon}     label="총 조회수" accent="bg-indigo-500"
+                           value={formatNumber(summary.totalViews)} subtitle={`콘텐츠 ${summary.count}개`} />
+                  <KpiCard icon={ClickIcon}   label="총 클릭" accent="bg-sky-500"
+                           value={formatNumber(summary.totalClicks)} subtitle={`클릭률 ${summary.clickRate.toFixed(2)}%`} />
+                  <KpiCard icon={MoneyIcon}   label="총 인센티브" accent="bg-rose-500"
+                           value={formatKRW(summary.totalIncentive)} subtitle={`CPC 평균 ${Math.round(summary.avgCpc)}원`} />
+                  <KpiCard icon={ReserveIcon} label="총 예약" accent="bg-emerald-500"
+                           value={formatNumber(summary.totalReservations) + "건"} subtitle={`전환율 ${summary.reservationRate.toFixed(1)}%`} />
+                  <KpiCard icon={ThumbsIcon}  label="총 좋아요" accent="bg-amber-500"
+                           value={formatNumber(summary.totalLikes)} />
+                  <KpiCard icon={MsgIcon}     label="총 댓글" accent="bg-violet-500"
+                           value={formatNumber(summary.totalComments)} />
+                </div>
+
+                <div className="mb-6">
+                  <div className="flex items-center justify-between mb-3">
+                    <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+                      <UserIcon className="w-5 h-5 text-gray-500" /> 인플루언서별 성과
+                    </h2>
+                    {!appsScriptUrl && (
+                      <span className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-1">
+                        Apps Script URL 미설정 — 정산 링크는 데이터 로딩이 안 돼요
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {influencerGroups.map(g => <InfluencerCard key={g.name} group={g} appsScriptUrl={appsScriptUrl} />)}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+                  <RankingList title="클릭 TOP 5" icon={ClickIcon} accent="bg-sky-500"
+                               items={items} valueKey="clicks" valueLabel="클릭" />
+                  <RankingList title="예약 TOP 5" icon={ReserveIcon} accent="bg-emerald-500"
+                               items={items} valueKey="reservations" valueLabel="건" />
+                  <RankingList title="인센티브 TOP 5" icon={MoneyIcon} accent="bg-rose-500"
+                               items={items} valueKey="incentive" valueLabel="원"
+                               formatFn={(v) => formatKRW(v)} />
+                </div>
+
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
+                      <TrophyIcon className="w-5 h-5 text-gray-500" /> 콘텐츠 상세 ({items.length})
+                    </h3>
+                    <p className="text-xs text-gray-400">헤더를 클릭하면 정렬이 바뀝니다</p>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-500 border-b border-gray-200">
+                          <th className="text-left py-2 px-2">인플루언서</th>
+                          <th className="text-left py-2 px-2">매체</th>
+                          <th className="text-left py-2 px-2">매장</th>
+                          <ThSort k="views" label="조회" />
+                          <ThSort k="likes" label="좋아요" />
+                          <ThSort k="comments" label="댓글" />
+                          <ThSort k="clicks" label="클릭" />
+                          <ThSort k="incentive" label="인센티브" />
+                          <ThSort k="reservations" label="예약" />
+                          <th className="text-right py-2 px-2">CPC</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sortedItems.map((it, idx) => {
+                          const views = it.apiViews !== null ? it.apiViews : it.sheetViews;
+                          const likes = it.apiLikes !== null ? it.apiLikes : it.sheetLikes;
+                          const comments = it.apiComments !== null ? it.apiComments : it.sheetComments;
+                          const cpc = it.clicks ? Math.round(it.incentive / it.clicks) : 0;
+                          return (
+                            <tr key={idx} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-2 px-2 text-gray-700 whitespace-nowrap">{it.influencer}</td>
+                              <td className="py-2 px-2 text-gray-600">{it.channel}</td>
+                              <td className="py-2 px-2">
+                                {it.contentUrl ? (
+                                  <a href={it.contentUrl} target="_blank" rel="noreferrer"
+                                     className="text-gray-900 font-medium hover:text-indigo-600">
+                                    {it.store}
+                                  </a>
+                                ) : <span>{it.store}</span>}
+                                {it.storeUrl && (
+                                  <a href={it.storeUrl} target="_blank" rel="noreferrer" className="ml-1 text-xs text-indigo-500 hover:underline">·예약</a>
+                                )}
+                              </td>
+                              <td className="py-2 px-2 text-right tabular-nums text-gray-800">{formatNumber(views)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-rose-700">{formatNumber(likes)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-amber-700">{formatNumber(comments)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-sky-700 font-semibold">{formatNumber(it.clicks)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-rose-700 font-semibold">{formatKRW(it.incentive)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-emerald-700 font-semibold">{formatNumber(it.reservations)}</td>
+                              <td className="py-2 px-2 text-right tabular-nums text-gray-600">{cpc ? `${cpc}원` : "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <footer className="mt-8 text-center text-xs text-gray-400">
+              Google Sheets API · YouTube Data API v3 · 클릭 데이터는 Airbridge 기반 수기 집계
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    function Root() {
+      if (IS_INFLUENCER_MODE) {
+        return <InfluencerView influencerName={URL_INFLUENCER} apiUrl={URL_API} />;
+      }
+      return <App />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
+  </script>
+</body>
+</html>

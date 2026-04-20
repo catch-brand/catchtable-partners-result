@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>YouTube 콘텐츠 지표 대시보드</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-presets="react">
+    const { useState, useMemo, useEffect } = React;
+    const API_KEY_STORAGE = "yt-dashboard:apiKey";
+    const URLS_STORAGE = "yt-dashboard:urls";
+    // 팀 공용 기본 키(사용자가 개별 입력 안 해도 되도록 내장)
+    const DEFAULT_YT_API_KEY = "AIzaSyBt-bW2HlywgbtdeVUqgPGwaHVar2umGZs";
+
+    // ---- 아이콘 (inline SVG) ----
+    const Icon = ({ path, className = "w-5 h-5" }) => (
+      <svg className={className} fill="none" stroke="currentColor" strokeWidth="2"
+           viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+        {path}
+      </svg>
+    );
+    const EyeIcon = (p) => <Icon {...p} path={<><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></>} />;
+    const ThumbsIcon = (p) => <Icon {...p} path={<path d="M7 10v12M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H6a2 2 0 0 1-2-2V12a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11l3.28-6.55A1.5 1.5 0 0 1 16 3.5a2.5 2.5 0 0 1 2 2.5l-3 0"/>} />;
+    const MsgIcon = (p) => <Icon {...p} path={<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>} />;
+    const YoutubeIcon = (p) => <Icon {...p} path={<><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.33z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"/></>} />;
+    const LoaderIcon = (p) => <Icon {...p} path={<><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></>} />;
+    const AlertIcon = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>} />;
+    const KeyIcon = (p) => <Icon {...p} path={<><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></>} />;
+    const InfoIcon = (p) => <Icon {...p} path={<><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></>} />;
+    const ExtIcon = (p) => <Icon {...p} path={<><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></>} />;
+    const RefreshIcon = (p) => <Icon {...p} path={<><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></>} />;
+    const CopyIcon = (p) => <Icon {...p} path={<><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>} />;
+    const CheckIcon = (p) => <Icon {...p} path={<polyline points="20 6 9 17 4 12"/>} />;
+    const SparkIcon = (p) => <Icon {...p} path={<><path d="M12 3l1.9 5.9L20 10l-5.1 1.9L12 18l-1.9-6.1L5 10l6.1-1.1L12 3z"/></>} />;
+    const TrophyIcon = (p) => <Icon {...p} path={<><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 4H4v3a3 3 0 0 0 3 3M17 4h3v3a3 3 0 0 1-3 3"/></>} />;
+    const DownloadIcon = (p) => <Icon {...p} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>} />;
+
+    // ---- 유튜브 URL → 영상 ID ----
+    function extractVideoId(input) {
+      if (!input) return null;
+      const s = input.trim();
+      if (/^[a-zA-Z0-9_-]{11}$/.test(s)) return s;
+      try {
+        const url = new URL(s);
+        const host = url.hostname.replace(/^www\.|^m\./, "");
+        if (host === "youtu.be") {
+          const id = url.pathname.split("/").filter(Boolean)[0];
+          return /^[a-zA-Z0-9_-]{11}$/.test(id) ? id : null;
+        }
+        if (host.endsWith("youtube.com")) {
+          const v = url.searchParams.get("v");
+          if (v && /^[a-zA-Z0-9_-]{11}$/.test(v)) return v;
+          const parts = url.pathname.split("/").filter(Boolean);
+          const idx = parts.findIndex(p => ["shorts","embed","live"].includes(p));
+          if (idx >= 0 && parts[idx+1] && /^[a-zA-Z0-9_-]{11}$/.test(parts[idx+1])) return parts[idx+1];
+        }
+      } catch(e) {}
+      return null;
+    }
+
+    // 여러 줄/쉼표/공백으로 분리해서 영상 ID 배열 반환 (중복 제거)
+    function parseVideoIds(text) {
+      if (!text) return [];
+      const tokens = text.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+      const ids = [];
+      const seen = new Set();
+      for (const t of tokens) {
+        const id = extractVideoId(t);
+        if (id && !seen.has(id)) { seen.add(id); ids.push(id); }
+      }
+      return ids;
+    }
+
+    function formatNumber(n) {
+      if (n === null || n === undefined) return "—";
+      const num = Number(n);
+      if (Number.isNaN(num)) return "—";
+      return num.toLocaleString("ko-KR");
+    }
+
+    function formatDateKo(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("ko-KR", { year:"numeric", month:"long", day:"numeric" });
+    }
+
+    function parseISODuration(iso) {
+      if (!iso) return "";
+      const m = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+      if (!m) return iso;
+      const [, d, h, mi, s] = m;
+      const hours = (parseInt(d||0)*24) + parseInt(h||0);
+      const parts = [];
+      if (hours) parts.push(String(hours).padStart(2,"0"));
+      parts.push(String(parseInt(mi||0)).padStart(hours?2:1,"0"));
+      parts.push(String(parseInt(s||0)).padStart(2,"0"));
+      return parts.join(":");
+    }
+
+    // ISO 재생시간 → 초
+    function durationToSeconds(iso) {
+      if (!iso) return 0;
+      const m = iso.match(/P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+      if (!m) return 0;
+      const [, d, h, mi, s] = m;
+      return parseInt(d||0)*86400 + parseInt(h||0)*3600 + parseInt(mi||0)*60 + parseInt(s||0);
+    }
+
+    function secondsToHuman(sec) {
+      if (!sec) return "0초";
+      const h = Math.floor(sec/3600);
+      const m = Math.floor((sec%3600)/60);
+      const s = sec%60;
+      if (h) return `${h}시간 ${m}분`;
+      if (m) return `${m}분 ${s}초`;
+      return `${s}초`;
+    }
+
+    // ---- 엑셀 다운로드 ----
+    function exportToExcel(videos) {
+      if (!videos || videos.length === 0) return;
+      if (typeof XLSX === "undefined") { alert("엑셀 라이브러리(XLSX)를 불러오지 못했습니다. 인터넷 연결을 확인해 주세요."); return; }
+
+      // 정렬: 조회수 내림차순
+      const sorted = [...videos].sort((a,b) =>
+        Number(b.statistics?.viewCount || 0) - Number(a.statistics?.viewCount || 0)
+      );
+
+      const rows = sorted.map((v, i) => {
+        const s = v.statistics || {};
+        const sn = v.snippet || {};
+        const cd = v.contentDetails || {};
+        const views = Number(s.viewCount || 0);
+        const likes = Number(s.likeCount || 0);
+        const comments = Number(s.commentCount || 0);
+        const likeRate = views ? (likes / views) : 0;
+        const commentRate = views ? (comments / views) : 0;
+        const publishedAt = sn.publishedAt ? new Date(sn.publishedAt) : null;
+        return {
+          "순위(조회수 기준)": i + 1,
+          "제목": sn.title || "",
+          "채널": sn.channelTitle || "",
+          "게시일": publishedAt ? publishedAt.toLocaleDateString("ko-KR") : "",
+          "재생시간": parseISODuration(cd.duration),
+          "재생시간(초)": durationToSeconds(cd.duration),
+          "조회수": views,
+          "좋아요": likes,
+          "댓글": comments,
+          "좋아요율(%)": Number((likeRate * 100).toFixed(3)),
+          "댓글율(%)": Number((commentRate * 100).toFixed(3)),
+          "URL": `https://www.youtube.com/watch?v=${v.id}`,
+          "영상 ID": v.id,
+        };
+      });
+
+      // 합계/평균 행
+      const sum = (k) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+      rows.push({});
+      rows.push({
+        "순위(조회수 기준)": "합계",
+        "조회수": sum("조회수"),
+        "좋아요": sum("좋아요"),
+        "댓글": sum("댓글"),
+      });
+      rows.push({
+        "순위(조회수 기준)": "평균",
+        "조회수": Math.round(sum("조회수") / sorted.length),
+        "좋아요": Math.round(sum("좋아요") / sorted.length),
+        "댓글": Math.round(sum("댓글") / sorted.length),
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      // 열 너비 조정
+      ws["!cols"] = [
+        { wch: 14 }, // 순위
+        { wch: 50 }, // 제목
+        { wch: 18 }, // 채널
+        { wch: 14 }, // 게시일
+        { wch: 12 }, // 재생시간
+        { wch: 12 }, // 재생시간(초)
+        { wch: 14 }, // 조회수
+        { wch: 12 }, // 좋아요
+        { wch: 12 }, // 댓글
+        { wch: 12 }, // 좋아요율
+        { wch: 12 }, // 댓글율
+        { wch: 44 }, // URL
+        { wch: 14 }, // 영상 ID
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "영상별 지표");
+
+      // 파일명: youtube-metrics-YYYYMMDD-HHMM.xlsx
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      const fname = `youtube-metrics-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
+      XLSX.writeFile(wb, fname);
+    }
+
+    // ---- 복사 버튼 ----
+    function CopyButton({ value, label = "복사", className = "" }) {
+      const [copied, setCopied] = useState(false);
+      const canCopy = value !== undefined && value !== null && String(value).length > 0;
+      const handleCopy = async () => {
+        if (!canCopy) return;
+        const text = String(value);
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const ta = document.createElement("textarea");
+            ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+            document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+          }
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch (e) { console.error("copy failed", e); }
+      };
+      return (
+        <button type="button" onClick={handleCopy} disabled={!canCopy}
+                title={canCopy ? `${label}` : "복사할 값 없음"}
+                aria-label={label}
+                className={
+                  "inline-flex items-center justify-center w-6 h-6 rounded-md border transition " +
+                  (copied
+                    ? "border-emerald-300 bg-emerald-50 text-emerald-600"
+                    : canCopy
+                    ? "border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                    : "border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed") + " " + className
+                }>
+          {copied ? <CheckIcon className="w-3.5 h-3.5" /> : <CopyIcon className="w-3.5 h-3.5" />}
+        </button>
+      );
+    }
+
+    // ---- 요약 지표 카드 ----
+    function SummaryCard({ icon: IconComp, label, value, accent, subtitle, copyValue }) {
+      return (
+        <div className="rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md p-5 transition">
+          <div className="flex items-center justify-between mb-3">
+            <span className={`inline-flex items-center justify-center w-9 h-9 rounded-xl ${accent}`}>
+              <IconComp className="w-5 h-5 text-white" />
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-medium text-gray-500">{label}</span>
+              {copyValue !== undefined && <CopyButton value={copyValue} label={`${label} 복사`} />}
+            </div>
+          </div>
+          <div className="text-3xl font-bold text-gray-900 tabular-nums">{value}</div>
+          {subtitle && <div className="mt-1 text-xs text-gray-500">{subtitle}</div>}
+        </div>
+      );
+    }
+
+    // ---- 랭킹 아이템 ----
+    function RankingItem({ rank, video, metricKey, metricLabel, accentClass }) {
+      const stats = video.statistics || {};
+      const snippet = video.snippet || {};
+      const content = video.contentDetails || {};
+      const thumb = snippet.thumbnails?.medium?.url || snippet.thumbnails?.default?.url;
+      const val = stats[metricKey];
+      const displayVal = formatNumber(val);
+
+      const rankColor = ["bg-amber-400","bg-gray-400","bg-orange-500","bg-indigo-400","bg-indigo-300"][rank-1] || "bg-gray-300";
+
+      return (
+        <div className="flex items-center gap-3 p-3 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 transition">
+          <span className={`flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-lg text-white text-sm font-bold ${rankColor}`}>
+            {rank}
+          </span>
+          {thumb && (
+            <img src={thumb} alt={snippet.title} className="flex-shrink-0 w-24 h-14 object-cover rounded-md bg-black" />
+          )}
+          <div className="flex-1 min-w-0">
+            <a href={`https://www.youtube.com/watch?v=${video.id}`} target="_blank" rel="noreferrer"
+               className="block text-sm font-semibold text-gray-900 hover:text-indigo-600 line-clamp-2 leading-snug">
+              {snippet.title}
+            </a>
+            <div className="mt-0.5 text-xs text-gray-500 truncate">
+              {snippet.channelTitle} · {formatDateKo(snippet.publishedAt)} · {parseISODuration(content.duration)}
+            </div>
+          </div>
+          <div className="flex-shrink-0 text-right">
+            <div className={`text-lg font-bold tabular-nums ${accentClass}`}>{displayVal}</div>
+            <div className="text-xs text-gray-400">{metricLabel}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ---- TOP 5 섹션 ----
+    function TopSection({ title, icon: IconComp, accent, accentClass, videos, metricKey, metricLabel }) {
+      const sorted = [...videos]
+        .filter(v => v.statistics && v.statistics[metricKey] !== undefined)
+        .sort((a,b) => Number(b.statistics[metricKey]) - Number(a.statistics[metricKey]))
+        .slice(0, 5);
+      return (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${accent}`}>
+              <IconComp className="w-4 h-4 text-white" />
+            </span>
+            <h3 className="text-base font-bold text-gray-900">{title}</h3>
+            <span className="text-xs text-gray-400">· 전체 {videos.length}개 중</span>
+          </div>
+          {sorted.length === 0 ? (
+            <p className="text-sm text-gray-500">{metricLabel} 데이터가 있는 영상이 없습니다.</p>
+          ) : (
+            <div className="space-y-2">
+              {sorted.map((v,i) => (
+                <RankingItem key={v.id} rank={i+1} video={v} metricKey={metricKey} metricLabel={metricLabel} accentClass={accentClass} />
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ---- 인사이트 분석 ----
+    function computeInsights(videos, metricKey) {
+      if (!videos || videos.length < 2) return null;
+      const withMetric = videos.filter(v => v.statistics && v.statistics[metricKey] !== undefined);
+      if (withMetric.length === 0) return null;
+      const sorted = [...withMetric].sort((a,b) => Number(b.statistics[metricKey]) - Number(a.statistics[metricKey]));
+      const topCount = Math.min(5, sorted.length);
+      const top = sorted.slice(0, topCount);
+      const rest = sorted.slice(topCount);
+      const weekdayKo = ["일","월","화","수","목","금","토"];
+
+      // 평균 계산 헬퍼
+      const mean = arr => arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : 0;
+      const ratio = (a,b) => b ? (a/b) : 0;
+
+      // 재생시간
+      const topDur = mean(top.map(v => durationToSeconds(v.contentDetails?.duration)));
+      const restDur = mean(rest.map(v => durationToSeconds(v.contentDetails?.duration)));
+
+      // 제목 길이 (문자 수)
+      const topTitleLen = mean(top.map(v => (v.snippet?.title || "").length));
+      const restTitleLen = mean(rest.map(v => (v.snippet?.title || "").length));
+
+      // 제목 패턴
+      const countHasNumber = arr => arr.filter(v => /\d/.test(v.snippet?.title || "")).length;
+      const countHasQuestion = arr => arr.filter(v => /[?？]/.test(v.snippet?.title || "")).length;
+      const countHasBracket = arr => arr.filter(v => /[\[\]\【\】\(\)]/.test(v.snippet?.title || "")).length;
+
+      // 게시 요일/시간 분포
+      const topDays = top.map(v => new Date(v.snippet?.publishedAt).getDay());
+      const dayCounts = [0,0,0,0,0,0,0];
+      topDays.forEach(d => { if (!Number.isNaN(d)) dayCounts[d]++; });
+      const dominantDayIdx = dayCounts.indexOf(Math.max(...dayCounts));
+
+      const topHours = top.map(v => new Date(v.snippet?.publishedAt).getHours()).filter(h => !Number.isNaN(h));
+      const avgHour = Math.round(mean(topHours));
+
+      // 참여율
+      const viewsArr = withMetric.map(v => Number(v.statistics.viewCount || 0));
+      const likesArr = withMetric.map(v => Number(v.statistics.likeCount || 0));
+      const commentsArr = withMetric.map(v => Number(v.statistics.commentCount || 0));
+      const topViews = top.map(v => Number(v.statistics.viewCount || 0));
+      const topLikes = top.map(v => Number(v.statistics.likeCount || 0));
+      const topComments = top.map(v => Number(v.statistics.commentCount || 0));
+
+      const avgLikeRate = ratio(topLikes.reduce((a,b)=>a+b,0), topViews.reduce((a,b)=>a+b,0)) * 100;
+      const avgCommentRate = ratio(topComments.reduce((a,b)=>a+b,0), topViews.reduce((a,b)=>a+b,0)) * 100;
+      const allLikeRate = ratio(likesArr.reduce((a,b)=>a+b,0), viewsArr.reduce((a,b)=>a+b,0)) * 100;
+      const allCommentRate = ratio(commentsArr.reduce((a,b)=>a+b,0), viewsArr.reduce((a,b)=>a+b,0)) * 100;
+
+      // 최고 게시일
+      const sortedByDate = [...top].sort((a,b) => new Date(a.snippet?.publishedAt) - new Date(b.snippet?.publishedAt));
+      const oldest = sortedByDate[0];
+      const newest = sortedByDate[sortedByDate.length-1];
+
+      const insights = [];
+
+      // 재생시간 인사이트
+      if (rest.length > 0 && topDur > 0 && restDur > 0) {
+        const ratioDur = topDur / restDur;
+        if (ratioDur > 1.25) {
+          insights.push(`📹 **긴 영상이 유리합니다.** 상위 ${topCount}개 평균 재생시간은 ${secondsToHuman(Math.round(topDur))}로, 나머지 평균(${secondsToHuman(Math.round(restDur))})보다 ${Math.round((ratioDur-1)*100)}% 깁니다.`);
+        } else if (ratioDur < 0.8) {
+          insights.push(`⏱️ **짧은 영상이 유리합니다.** 상위 ${topCount}개 평균 재생시간은 ${secondsToHuman(Math.round(topDur))}로, 나머지 평균(${secondsToHuman(Math.round(restDur))})보다 ${Math.round((1-ratioDur)*100)}% 짧습니다.`);
+        } else {
+          insights.push(`📏 재생시간은 영향이 크지 않아 보입니다. 상위 평균 ${secondsToHuman(Math.round(topDur))} vs 나머지 평균 ${secondsToHuman(Math.round(restDur))}.`);
+        }
+      }
+
+      // 제목 길이
+      if (rest.length > 0 && topTitleLen > 0 && restTitleLen > 0) {
+        const diff = topTitleLen - restTitleLen;
+        if (Math.abs(diff) > 5) {
+          insights.push(`✍️ 상위 ${topCount}개 제목 평균 길이는 ${Math.round(topTitleLen)}자로, 나머지(${Math.round(restTitleLen)}자)보다 ${diff > 0 ? "길게" : "짧게"} 쓰는 경향이 있습니다.`);
+        }
+      }
+
+      // 제목 패턴 — 숫자
+      const topWithNum = countHasNumber(top);
+      if (topWithNum / topCount >= 0.6) {
+        insights.push(`🔢 상위 ${topCount}개 중 ${topWithNum}개(${Math.round(topWithNum/topCount*100)}%) 제목에 **숫자**가 포함되어 있습니다. 구체적인 수치(순위·개수·연도)가 관심을 끄는 요소로 보입니다.`);
+      }
+
+      // 제목 패턴 — 물음표
+      const topWithQ = countHasQuestion(top);
+      if (topWithQ / topCount >= 0.4) {
+        insights.push(`❓ 상위 ${topCount}개 중 ${topWithQ}개 제목에 **물음표**가 들어갑니다. 호기심을 자극하는 질문형 제목이 효과적입니다.`);
+      }
+
+      // 제목 패턴 — 대괄호/괄호
+      const topWithBr = countHasBracket(top);
+      if (topWithBr / topCount >= 0.6) {
+        insights.push(`〔〕 상위 ${topCount}개 중 ${topWithBr}개가 제목에 **대괄호·괄호**(시리즈 표시나 카테고리 태그)를 사용합니다.`);
+      }
+
+      // 요일
+      if (dayCounts[dominantDayIdx] >= Math.ceil(topCount * 0.4)) {
+        insights.push(`📅 상위 ${topCount}개 중 ${dayCounts[dominantDayIdx]}개가 **${weekdayKo[dominantDayIdx]}요일**에 게시되었습니다. 이 요일 업로드가 유리한 패턴입니다.`);
+      }
+
+      // 게시 시간대
+      if (!Number.isNaN(avgHour)) {
+        const timeSlot = avgHour < 6 ? "새벽" : avgHour < 12 ? "오전" : avgHour < 18 ? "오후" : "저녁~밤";
+        insights.push(`🕐 상위 ${topCount}개의 평균 게시 시각은 **${avgHour}시 (${timeSlot})** 입니다.`);
+      }
+
+      // 참여율 (좋아요·댓글 기준일 때만 표시)
+      if (metricKey === "likeCount" && avgLikeRate > 0) {
+        insights.push(`💚 상위 ${topCount}개의 좋아요 비율(조회수 대비)은 **${avgLikeRate.toFixed(2)}%** 입니다. 전체 평균 ${allLikeRate.toFixed(2)}% ${avgLikeRate > allLikeRate ? "보다 높음" : "보다 낮음"}.`);
+      }
+      if (metricKey === "commentCount" && avgCommentRate > 0) {
+        insights.push(`💬 상위 ${topCount}개의 댓글 비율(조회수 대비)은 **${avgCommentRate.toFixed(3)}%** 입니다. 전체 평균 ${allCommentRate.toFixed(3)}% ${avgCommentRate > allCommentRate ? "보다 높음" : "보다 낮음"}.`);
+      }
+
+      // 게시 시점
+      if (oldest && newest && oldest !== newest) {
+        insights.push(`⌛ 상위 ${topCount}개는 ${formatDateKo(oldest.snippet.publishedAt)} ~ ${formatDateKo(newest.snippet.publishedAt)} 사이에 게시되었습니다.`);
+      }
+
+      return insights;
+    }
+
+    function InsightBlock({ title, icon: IconComp, accent, insights }) {
+      if (!insights || insights.length === 0) {
+        return (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+            <div className="flex items-center gap-2 mb-2">
+              <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${accent}`}>
+                <IconComp className="w-4 h-4 text-white" />
+              </span>
+              <h3 className="text-base font-bold text-gray-900">{title}</h3>
+            </div>
+            <p className="text-sm text-gray-500">분석을 위해 최소 2개 이상의 영상이 필요합니다.</p>
+          </div>
+        );
+      }
+      return (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${accent}`}>
+              <IconComp className="w-4 h-4 text-white" />
+            </span>
+            <h3 className="text-base font-bold text-gray-900">{title}</h3>
+          </div>
+          <ul className="space-y-2">
+            {insights.map((text, i) => (
+              <li key={i} className="text-sm text-gray-700 leading-relaxed">
+                {text.split(/(\*\*[^*]+\*\*)/g).map((part, idx) =>
+                  part.startsWith("**") && part.endsWith("**")
+                    ? <span key={idx} className="font-bold text-gray-900">{part.slice(2,-2)}</span>
+                    : <span key={idx}>{part}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    }
+
+    // ---- 메인 앱 ----
+    function App() {
+      const [apiKey, setApiKey] = useState("");
+      const [showKey, setShowKey] = useState(false);
+      const [savedKey, setSavedKey] = useState("");
+      const [urlsText, setUrlsText] = useState("");
+      const [videos, setVideos] = useState([]);
+      const [loading, setLoading] = useState(false);
+      const [error, setError] = useState("");
+
+      useEffect(() => {
+        try {
+          const k = localStorage.getItem(API_KEY_STORAGE) || DEFAULT_YT_API_KEY;
+          if (k) { setApiKey(k); setSavedKey(k); }
+          const u = localStorage.getItem(URLS_STORAGE);
+          if (u) setUrlsText(u);
+        } catch(e) {
+          if (DEFAULT_YT_API_KEY) { setApiKey(DEFAULT_YT_API_KEY); setSavedKey(DEFAULT_YT_API_KEY); }
+        }
+      }, []);
+
+      const videoIds = useMemo(() => parseVideoIds(urlsText), [urlsText]);
+
+      const clearApiKey = () => {
+        try { localStorage.removeItem(API_KEY_STORAGE); } catch(e) {}
+        setApiKey(""); setSavedKey("");
+      };
+
+      const fetchBatch = async () => {
+        setError("");
+        if (!apiKey) { setError("YouTube Data API 키를 먼저 입력해 주세요."); return; }
+        if (videoIds.length === 0) { setError("유효한 YouTube 링크를 한 개 이상 입력해 주세요."); return; }
+        if (videoIds.length > 50) { setError(`한 번에 최대 50개까지 조회 가능합니다. (현재 ${videoIds.length}개)`); return; }
+
+        setLoading(true); setVideos([]);
+        try {
+          const endpoint = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${videoIds.join(",")}&key=${encodeURIComponent(apiKey)}`;
+          const res = await fetch(endpoint);
+          const json = await res.json();
+          if (!res.ok) throw new Error(json?.error?.message || `HTTP ${res.status}`);
+          if (!json.items) throw new Error("응답이 비어 있습니다.");
+
+          setVideos(json.items);
+          try {
+            localStorage.setItem(API_KEY_STORAGE, apiKey);
+            localStorage.setItem(URLS_STORAGE, urlsText);
+            setSavedKey(apiKey);
+          } catch(e) {}
+
+          const returnedIds = new Set(json.items.map(v => v.id));
+          const missing = videoIds.filter(id => !returnedIds.has(id));
+          if (missing.length > 0) {
+            setError(`${missing.length}개 영상을 찾을 수 없거나 비공개 상태입니다: ${missing.slice(0,3).join(", ")}${missing.length>3?" ...":""}`);
+          }
+        } catch(e) {
+          setError(e.message || "요청 실패");
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      const onSubmit = (e) => { e.preventDefault(); fetchBatch(); };
+
+      // 요약 통계
+      const summary = useMemo(() => {
+        if (videos.length === 0) return null;
+        const sum = (k) => videos.reduce((a,v) => a + Number(v.statistics?.[k] || 0), 0);
+        return {
+          count: videos.length,
+          totalViews: sum("viewCount"),
+          totalLikes: sum("likeCount"),
+          totalComments: sum("commentCount"),
+          avgViews: Math.round(sum("viewCount") / videos.length),
+          avgLikes: Math.round(sum("likeCount") / videos.length),
+          avgComments: Math.round(sum("commentCount") / videos.length),
+        };
+      }, [videos]);
+
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-rose-50 via-white to-indigo-50 p-6">
+          <div className="max-w-6xl mx-auto">
+            {/* 헤더 */}
+            <header className="flex items-center gap-3 mb-6">
+              <span className="inline-flex items-center justify-center w-11 h-11 rounded-2xl bg-red-600">
+                <YoutubeIcon className="w-6 h-6 text-white" />
+              </span>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">YouTube 콘텐츠 지표 대시보드</h1>
+                <p className="text-sm text-gray-500">여러 영상을 한 번에 분석해 TOP 5 랭킹과 성공 패턴 인사이트를 확인합니다.</p>
+              </div>
+            </header>
+
+            {/* 입력 폼 */}
+            <form onSubmit={onSubmit} className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
+              <div className="space-y-4">
+                {/* API 키 */}
+                <div>
+                  <label className="flex items-center justify-between gap-1.5 text-sm font-semibold text-gray-700 mb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <KeyIcon className="w-4 h-4" /> YouTube Data API v3 키
+                    </span>
+                    {savedKey && (
+                      <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-full px-2 py-0.5">
+                        <CheckIcon className="w-3 h-3" /> 브라우저에 저장됨
+                      </span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input type={showKey ? "text" : "password"} value={apiKey}
+                           onChange={(e)=>setApiKey(e.target.value)}
+                           placeholder="AIzaSy... (Google Cloud Console에서 발급)"
+                           autoComplete="off"
+                           className="flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                    <button type="button" onClick={()=>setShowKey(v=>!v)}
+                            className="px-3 py-2 rounded-xl text-xs font-medium border border-gray-300 bg-white hover:bg-gray-50">
+                      {showKey ? "숨김" : "보기"}
+                    </button>
+                    {savedKey && (
+                      <button type="button" onClick={clearApiKey}
+                              title="저장된 키 삭제"
+                              className="px-3 py-2 rounded-xl text-xs font-medium border border-rose-200 bg-white text-rose-600 hover:bg-rose-50">
+                        지우기
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* URL 목록 */}
+                <div>
+                  <label className="flex items-center justify-between text-sm font-semibold text-gray-700 mb-1.5">
+                    <span>YouTube 링크 목록 (한 줄에 하나씩 입력, 최대 50개)</span>
+                    <span className="text-xs font-normal text-gray-500">감지된 영상: <b className="text-gray-700">{videoIds.length}</b>개</span>
+                  </label>
+                  <textarea
+                    value={urlsText}
+                    onChange={(e)=>setUrlsText(e.target.value)}
+                    placeholder={"https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://youtu.be/abcdefghijk\nhttps://www.youtube.com/shorts/..."}
+                    rows={6}
+                    className="w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-2">
+                    <p className="text-xs text-gray-500">※ URL·영상 ID 혼용 가능. 줄바꿈/쉼표/공백으로 구분됩니다. 중복은 자동 제거.</p>
+                    <button type="submit" disabled={loading}
+                            className="inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700 disabled:opacity-60">
+                      {loading ? (<><LoaderIcon className="w-4 h-4 animate-spin" /> 분석 중</>) :
+                                 (<><RefreshIcon className="w-4 h-4" /> {videoIds.length}개 영상 분석</>)}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+
+            {/* 에러 */}
+            {error && (
+              <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                <AlertIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  <div className="font-semibold">안내</div>
+                  <div>{error}</div>
+                </div>
+              </div>
+            )}
+
+            {/* 요약 */}
+            {summary && (
+              <>
+                <div className="mb-4 text-xs text-gray-500">
+                  분석 대상 영상 <b className="text-gray-800">{summary.count}</b>개 · 평균 조회 <b className="text-gray-800">{formatNumber(summary.avgViews)}</b>회 · 평균 좋아요 <b className="text-gray-800">{formatNumber(summary.avgLikes)}</b>개 · 평균 댓글 <b className="text-gray-800">{formatNumber(summary.avgComments)}</b>개
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                  <SummaryCard icon={EyeIcon}    label="누적 조회수"  accent="bg-indigo-500"
+                               value={formatNumber(summary.totalViews)} subtitle={`평균 ${formatNumber(summary.avgViews)}회`} copyValue={formatNumber(summary.totalViews)} />
+                  <SummaryCard icon={ThumbsIcon} label="누적 좋아요" accent="bg-rose-500"
+                               value={formatNumber(summary.totalLikes)} subtitle={`평균 ${formatNumber(summary.avgLikes)}개`} copyValue={formatNumber(summary.totalLikes)} />
+                  <SummaryCard icon={MsgIcon}    label="누적 댓글"    accent="bg-amber-500"
+                               value={formatNumber(summary.totalComments)} subtitle={`평균 ${formatNumber(summary.avgComments)}개`} copyValue={formatNumber(summary.totalComments)} />
+                </div>
+
+                {/* TOP 5 랭킹 */}
+                <div className="grid grid-cols-1 xl:grid-cols-3 gap-5 mb-6">
+                  <TopSection title="조회수 TOP 5" icon={EyeIcon} accent="bg-indigo-500" accentClass="text-indigo-600"
+                              videos={videos} metricKey="viewCount" metricLabel="조회" />
+                  <TopSection title="좋아요 TOP 5" icon={ThumbsIcon} accent="bg-rose-500" accentClass="text-rose-600"
+                              videos={videos} metricKey="likeCount" metricLabel="좋아요" />
+                  <TopSection title="댓글 TOP 5" icon={MsgIcon} accent="bg-amber-500" accentClass="text-amber-600"
+                              videos={videos} metricKey="commentCount" metricLabel="댓글" />
+                </div>
+
+                {/* 인사이트 */}
+                <div className="mb-6">
+                  <div className="flex items-center gap-2 mb-3">
+                    <SparkIcon className="w-5 h-5 text-indigo-500" />
+                    <h2 className="text-lg font-bold text-gray-900">성공 패턴 인사이트</h2>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">각 지표 기준 상위 영상들의 공통 특징을 분석했습니다. (*휴리스틱 분석 — 제목·재생시간·게시 시점·참여율 기반)</p>
+                  <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+                    <InsightBlock title="조회수가 잘 나오는 영상" icon={EyeIcon} accent="bg-indigo-500"
+                                  insights={computeInsights(videos, "viewCount")} />
+                    <InsightBlock title="좋아요가 잘 나오는 영상" icon={ThumbsIcon} accent="bg-rose-500"
+                                  insights={computeInsights(videos, "likeCount")} />
+                    <InsightBlock title="댓글이 잘 나오는 영상" icon={MsgIcon} accent="bg-amber-500"
+                                  insights={computeInsights(videos, "commentCount")} />
+                  </div>
+                </div>
+
+                {/* 전체 리스트 */}
+                <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <TrophyIcon className="w-5 h-5 text-gray-500" />
+                      <h3 className="text-base font-bold text-gray-900">분석한 전체 영상 ({videos.length})</h3>
+                    </div>
+                    <button type="button" onClick={() => exportToExcel(videos)}
+                            title="현재 분석 결과를 .xlsx 파일로 저장"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100">
+                      <DownloadIcon className="w-4 h-4" /> 엑셀 다운로드
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-xs text-gray-500 border-b border-gray-200">
+                          <th className="text-left py-2 pr-3">제목</th>
+                          <th className="text-right py-2 px-2">조회</th>
+                          <th className="text-right py-2 px-2">좋아요</th>
+                          <th className="text-right py-2 px-2">댓글</th>
+                          <th className="text-right py-2 pl-2">재생시간</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {videos.map(v => (
+                          <tr key={v.id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-2 pr-3">
+                              <a href={`https://www.youtube.com/watch?v=${v.id}`} target="_blank" rel="noreferrer"
+                                 className="text-gray-800 hover:text-indigo-600 font-medium line-clamp-1">
+                                {v.snippet?.title}
+                              </a>
+                              <div className="text-xs text-gray-500">{v.snippet?.channelTitle} · {formatDateKo(v.snippet?.publishedAt)}</div>
+                            </td>
+                            <td className="text-right tabular-nums py-2 px-2 text-indigo-700 font-semibold">{formatNumber(v.statistics?.viewCount)}</td>
+                            <td className="text-right tabular-nums py-2 px-2 text-rose-700 font-semibold">{formatNumber(v.statistics?.likeCount)}</td>
+                            <td className="text-right tabular-nums py-2 px-2 text-amber-700 font-semibold">{formatNumber(v.statistics?.commentCount)}</td>
+                            <td className="text-right tabular-nums py-2 pl-2 text-gray-600">{parseISODuration(v.contentDetails?.duration)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* 빈 상태 */}
+            {videos.length === 0 && !error && !loading && (
+              <div className="rounded-2xl border border-dashed border-gray-300 bg-white/50 p-10 text-center text-gray-500">
+                <YoutubeIcon className="w-10 h-10 mx-auto mb-3 text-gray-300" />
+                <p className="text-sm">API 키와 YouTube 링크들을 입력하고 <b>분석</b> 버튼을 눌러주세요.</p>
+                <p className="text-xs mt-1">한 줄에 하나씩, 최대 50개까지 한 번에 분석할 수 있습니다.</p>
+              </div>
+            )}
+
+            <footer className="mt-8 text-center text-xs text-gray-400">
+              Powered by YouTube Data API v3 · 인사이트는 제목/재생시간/게시 시점 등의 메타데이터 기반 휴리스틱 분석입니다.
+            </footer>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

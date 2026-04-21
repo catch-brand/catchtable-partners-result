@@ -27,6 +27,7 @@
     const KEY_INCENTIVE       = "ct-partners:incentive";
     const KEY_APPS_SCRIPT_URL = "ct-partners:appsScriptUrl";
     const KEY_PAYOUT_LOG      = "ct-partners:payoutLog";
+    const KEY_INFLUENCER_EMAIL = "ct-partners:influencerEmail"; // per-influencer 키로 저장: `${KEY}:${name}`
 
     const DEFAULT_SHEET_ID = "1rYBgdB7n3R9WYNyzrBr01ArDjNQ8ie14Uuw-2q3N7tc";
     const DEFAULT_SHEET_GID = "1947202841";
@@ -163,6 +164,14 @@
       if (!apiUrl) throw new Error("Apps Script URL이 설정되지 않았습니다.");
       const url = `${apiUrl}?influencer=${encodeURIComponent(influencer)}`;
       const res = await fetch(url, { method: "GET", redirect: "follow" });
+      if (!res.ok) throw new Error(`Apps Script HTTP ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      return json;
+    }
+    async function fetchManagerDataFromAppsScript(apiUrl) {
+      if (!apiUrl) throw new Error("Apps Script URL이 설정되지 않았습니다.");
+      const res = await fetch(apiUrl, { method: "GET", redirect: "follow" });
       if (!res.ok) throw new Error(`Apps Script HTTP ${res.status}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
@@ -483,11 +492,19 @@
       // 정산 로그 (로컬)
       const [localLog, setLocalLog] = useState([]);
 
+      // 인플루언서 이메일 (정산 완료 시 자동 알림 수신용) — per-influencer 로 캐시, 선택 사항
+      const [wantsEmailNotification, setWantsEmailNotification] = useState(false);
+      const [influencerEmailInput, setInfluencerEmailInput] = useState("");
+
       useEffect(() => {
         try {
           const raw = localStorage.getItem(KEY_PAYOUT_LOG);
           const arr = raw ? JSON.parse(raw) : [];
           setLocalLog(arr.filter(x => x.influencer === influencerName));
+          const savedEmail = localStorage.getItem(`${KEY_INFLUENCER_EMAIL}:${influencerName}`) || "";
+          setInfluencerEmailInput(savedEmail);
+          // 과거에 이메일을 저장했다면 알림 옵션도 기본 ON
+          setWantsEmailNotification(!!savedEmail);
         } catch(e) {}
       }, [influencerName]);
 
@@ -535,31 +552,65 @@
         return { totalClicks, totalIncentive, totalViews, videoCount: items.length };
       }, [items]);
 
-      // 이미 정산 요청한 누적 금액/클릭 (시트의 '정산 요청 로그' 기준)
-      // 이 값을 현재 누적 인센티브에서 빼서 '이번 요청 금액'을 산출 → 중복 정산 방지
+      // 정산 로그를 상태별로 분리:
+      //  - '지급 완료' (paid): 실제 입금 완료된 건
+      //  - '요청 접수' (requested): 인플루언서가 요청했으나 아직 매니저가 처리 전
+      //  - 반려/취소는 서버에서 이미 제외되어 내려옴
       const paidSummary = useMemo(() => {
-        const paidAmount = serverPayoutLog.reduce((a, r) => a + Number(r.amount || 0), 0);
-        const paidClicks = serverPayoutLog.reduce((a, r) => a + Number(r.clickCount || 0), 0);
-        return { paidAmount, paidClicks, payoutCount: serverPayoutLog.length };
+        const paid = serverPayoutLog.filter(r => String(r.status || "").trim() === "지급 완료");
+        return {
+          paidAmount:  paid.reduce((a, r) => a + Number(r.amount || 0), 0),
+          paidClicks:  paid.reduce((a, r) => a + Number(r.clickCount || 0), 0),
+          payoutCount: paid.length,
+        };
       }, [serverPayoutLog]);
 
-      const pending = useMemo(() => {
-        const pendingAmount = Math.max(0, totals.totalIncentive - paidSummary.paidAmount);
-        const pendingClicks = Math.max(0, totals.totalClicks - paidSummary.paidClicks);
-        return { pendingAmount, pendingClicks };
-      }, [totals, paidSummary]);
+      const requestedSummary = useMemo(() => {
+        const req = serverPayoutLog.filter(r => String(r.status || "").trim() === "요청 접수");
+        return {
+          requestedAmount: req.reduce((a, r) => a + Number(r.amount || 0), 0),
+          requestedClicks: req.reduce((a, r) => a + Number(r.clickCount || 0), 0),
+          requestCount:    req.length,
+        };
+      }, [serverPayoutLog]);
+
+      // 요청 가능한 금액 = 누적 인센티브 - (이미 지급 완료 + 요청중)
+      const available = useMemo(() => {
+        const availableAmount = Math.max(0,
+          totals.totalIncentive - paidSummary.paidAmount - requestedSummary.requestedAmount);
+        const availableClicks = Math.max(0,
+          totals.totalClicks - paidSummary.paidClicks - requestedSummary.requestedClicks);
+        return { availableAmount, availableClicks };
+      }, [totals, paidSummary, requestedSummary]);
 
       const payoutDate = useMemo(() => calculatePayoutDate(new Date()), []);
 
       const submitPayout = async () => {
         setSubmitting(true); setSubmitError("");
+
+        // 이메일은 선택 사항 — 체크박스가 ON일 때만 사용
+        const email = wantsEmailNotification ? (influencerEmailInput || "").trim() : "";
+        if (wantsEmailNotification) {
+          if (!email) {
+            setSubmitError("이메일 알림을 받으려면 이메일을 입력해주세요. (또는 체크를 해제해도 돼요)");
+            setSubmitting(false);
+            return;
+          }
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            setSubmitError("이메일 형식이 올바르지 않아요.");
+            setSubmitting(false);
+            return;
+          }
+        }
+
         try {
           const payload = {
             action: "payout",
             influencer: influencerName,
-            amount: pending.pendingAmount,              // ★ 누적이 아닌 '이번 요청분'만 전송
+            influencerEmail: email,                      // ★ 완료 시 자동 알림 발송용
+            amount: available.availableAmount,           // ★ 누적이 아닌 '이번 요청분'만 전송
             videoCount: totals.videoCount,
-            clickCount: pending.pendingClicks,          // ★ 신규 클릭 수
+            clickCount: available.availableClicks,       // ★ 신규 클릭 수
             clickedAt: new Date().toISOString(),
             payoutDate: payoutDate.toISOString(),
             // 참고용 메타: 시트 담당자가 검토할 때 맥락 제공
@@ -567,8 +618,15 @@
             cumulativeClicks: totals.totalClicks,
             previouslyPaidAmount: paidSummary.paidAmount,
             previousPayoutCount: paidSummary.payoutCount,
+            previouslyRequestedAmount: requestedSummary.requestedAmount,
           };
           const resp = await postPayoutToAppsScript(apiUrl, payload);
+
+          // 이메일 캐시 저장
+          if (email) {
+            try { localStorage.setItem(`${KEY_INFLUENCER_EMAIL}:${influencerName}`, email); } catch(e) {}
+          }
+
           const record = {
             ...payload,
             appsScriptResponse: resp,
@@ -586,6 +644,7 @@
           setServerPayoutLog(prev => [
             ...prev,
             {
+              rowNumber:   resp && resp.rowNumber,
               requestedAt: payload.clickedAt,
               amount: payload.amount,
               videoCount: payload.videoCount,
@@ -649,26 +708,35 @@
                 <div className="rounded-3xl bg-gradient-to-br from-indigo-600 to-indigo-800 text-white shadow-xl p-8 mb-6">
                   <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
                     <div className="flex-1">
-                      <p className="text-sm text-indigo-200 mb-1">이번에 정산 받을 금액 (미지급)</p>
-                      <p className="text-5xl font-bold tabular-nums">{formatKRW(pending.pendingAmount)}</p>
+                      <p className="text-sm text-indigo-200 mb-1">지금 요청 가능한 금액</p>
+                      <p className="text-5xl font-bold tabular-nums">{formatKRW(available.availableAmount)}</p>
                       <p className="text-sm text-indigo-200 mt-2">
-                        신규 클릭 {formatNumber(pending.pendingClicks)}회 · 콘텐츠 {totals.videoCount}개
+                        신규 클릭 {formatNumber(available.availableClicks)}회 · 콘텐츠 {totals.videoCount}개
                       </p>
 
-                      {/* 누적/완료 breakdown */}
-                      <div className="mt-4 pt-4 border-t border-indigo-400/40 grid grid-cols-2 gap-3 text-xs">
+                      {/* 3단 breakdown: 누적 / 요청중 / 지급완료 */}
+                      <div className="mt-4 pt-4 border-t border-indigo-400/40 grid grid-cols-3 gap-3 text-xs">
                         <div>
                           <div className="text-indigo-200">누적 인센티브</div>
                           <div className="font-semibold tabular-nums">{formatKRW(totals.totalIncentive)}</div>
                           <div className="text-indigo-300">총 클릭 {formatNumber(totals.totalClicks)}회</div>
                         </div>
                         <div>
-                          <div className="text-indigo-200">기존 정산 완료</div>
-                          <div className="font-semibold tabular-nums">- {formatKRW(paidSummary.paidAmount)}</div>
+                          <div className="text-amber-200">요청중 (미지급)</div>
+                          <div className="font-semibold tabular-nums text-amber-100">- {formatKRW(requestedSummary.requestedAmount)}</div>
+                          <div className="text-indigo-300">
+                            {requestedSummary.requestCount > 0
+                              ? `${requestedSummary.requestCount}건 · 매니저 확인 중`
+                              : "대기 중 요청 없음"}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-emerald-200">지급 완료</div>
+                          <div className="font-semibold tabular-nums text-emerald-100">- {formatKRW(paidSummary.paidAmount)}</div>
                           <div className="text-indigo-300">
                             {paidSummary.payoutCount > 0
-                              ? `${paidSummary.payoutCount}회 요청 · 클릭 ${formatNumber(paidSummary.paidClicks)}회`
-                              : "지난 요청 없음"}
+                              ? `${paidSummary.payoutCount}회 · 클릭 ${formatNumber(paidSummary.paidClicks)}회`
+                              : "지난 완료 없음"}
                           </div>
                         </div>
                       </div>
@@ -678,12 +746,17 @@
                       <p className="text-xl font-semibold">{formatDateKR(payoutDate)}</p>
                       <button
                         onClick={() => setConfirmOpen(true)}
-                        disabled={pending.pendingAmount <= 0}
+                        disabled={available.availableAmount <= 0}
                         className="mt-4 inline-flex items-center gap-2 px-6 py-3 rounded-2xl bg-white text-indigo-700 font-bold text-base hover:bg-indigo-50 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg"
                       >
-                        <MoneyIcon className="w-5 h-5" /> 정산 받기
+                        <MoneyIcon className="w-5 h-5" /> 정산 요청하기
                       </button>
-                      {pending.pendingAmount <= 0 && (
+                      {available.availableAmount <= 0 && requestedSummary.requestedAmount > 0 && (
+                        <p className="mt-2 text-[11px] text-amber-200">
+                          요청중인 건이 있어요.<br/>매니저 확인 후 지급되면 다시 요청할 수 있어요.
+                        </p>
+                      )}
+                      {available.availableAmount <= 0 && requestedSummary.requestedAmount === 0 && (
                         <p className="mt-2 text-[11px] text-indigo-200">
                           지금 정산할 금액이 없어요.<br/>새로운 클릭이 쌓이면 다시 신청할 수 있어요.
                         </p>
@@ -692,19 +765,40 @@
                   </div>
                 </div>
 
-                {/* 정산 로그 */}
-                {localLog.length > 0 && (
-                  <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
-                    <h3 className="text-sm font-bold text-emerald-900 mb-2 flex items-center gap-2">
-                      <CheckIcon className="w-4 h-4" /> 최근 정산 요청 내역
+                {/* 서버 정산 로그 (상태별 표시) */}
+                {serverPayoutLog.length > 0 && (
+                  <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
+                    <h3 className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
+                      <CheckIcon className="w-4 h-4 text-emerald-600" /> 정산 내역
                     </h3>
-                    <ul className="space-y-1 text-xs text-emerald-900">
-                      {localLog.slice().reverse().slice(0, 5).map((r, i) => (
-                        <li key={i} className="flex justify-between">
-                          <span>{new Date(r.clickedAt).toLocaleString("ko-KR")} 신청</span>
-                          <span className="font-semibold">{formatKRW(r.amount)} · 지급일 {formatDateKR(r.payoutDate)}</span>
-                        </li>
-                      ))}
+                    <ul className="space-y-2 text-xs">
+                      {serverPayoutLog.slice().sort((a,b) =>
+                        new Date(b.requestedAt) - new Date(a.requestedAt)
+                      ).slice(0, 10).map((r, i) => {
+                        const status = String(r.status || "").trim();
+                        const isPaid = status === "지급 완료";
+                        return (
+                          <li key={i} className="flex items-center justify-between gap-3 py-1 border-b border-gray-100 last:border-0">
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                isPaid
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-amber-100 text-amber-700"
+                              }`}>
+                                {isPaid ? "✓ 지급 완료" : "⏳ 매니저 확인중"}
+                              </span>
+                              <span className="text-gray-500 truncate">
+                                {r.requestedAt ? new Date(r.requestedAt).toLocaleString("ko-KR") : ""} 요청
+                              </span>
+                            </div>
+                            <span className={`font-semibold tabular-nums flex-shrink-0 ${
+                              isPaid ? "text-emerald-700" : "text-amber-700"
+                            }`}>
+                              {formatKRW(r.amount)}
+                            </span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 )}
@@ -777,20 +871,61 @@
           {confirmOpen && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-                <h3 className="text-lg font-bold text-gray-900 mb-3">정산 신청 확인</h3>
+                <h3 className="text-lg font-bold text-gray-900 mb-3">정산 요청 확인</h3>
                 <p className="text-sm text-gray-600 mb-4">
-                  아래 금액으로 정산 요청을 접수할까요?
-                  요청 내역은 담당자({"sangho.park@catchtable.co.kr"})에게 메일로 전달돼요.
+                  아래 금액으로 정산 요청을 접수할까요?<br/>
+                  요청 내역은 담당자({"sangho.park@catchtable.co.kr"})에게 자동 전달되고,
+                  실제 지급은 담당자가 확인 후 처리해요.
                 </p>
                 <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4 space-y-2 text-sm">
                   <div className="flex justify-between"><span className="text-gray-500">인플루언서</span><span className="font-semibold">{influencerName}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">콘텐츠 수</span><span className="font-semibold">{totals.videoCount}개</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">누적 클릭</span><span>{formatNumber(totals.totalClicks)}회</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">누적 인센티브</span><span>{formatKRW(totals.totalIncentive)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">기존 정산 완료</span><span className="text-gray-600">- {formatKRW(paidSummary.paidAmount)}</span></div>
-                  <div className="flex justify-between border-t pt-2 mt-2"><span className="text-gray-700">이번 정산 금액</span><span className="font-bold text-rose-700 text-lg">{formatKRW(pending.pendingAmount)}</span></div>
+                  {requestedSummary.requestedAmount > 0 && (
+                    <div className="flex justify-between"><span className="text-gray-500">요청중 (미지급)</span><span className="text-amber-700">- {formatKRW(requestedSummary.requestedAmount)}</span></div>
+                  )}
+                  {paidSummary.paidAmount > 0 && (
+                    <div className="flex justify-between"><span className="text-gray-500">기존 지급 완료</span><span className="text-emerald-700">- {formatKRW(paidSummary.paidAmount)}</span></div>
+                  )}
+                  <div className="flex justify-between border-t pt-2 mt-2"><span className="text-gray-700">이번 요청 금액</span><span className="font-bold text-rose-700 text-lg">{formatKRW(available.availableAmount)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">지급 예정일</span><span className="font-semibold">{formatDateKR(payoutDate)}</span></div>
                 </div>
+
+                {/* 이메일 알림 (선택 사항) */}
+                <div className="mb-4 rounded-xl border border-gray-200 bg-white p-3">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={wantsEmailNotification}
+                      onChange={e => setWantsEmailNotification(e.target.checked)}
+                      disabled={submitting}
+                      className="mt-0.5 w-4 h-4 rounded border-gray-300 text-indigo-600 focus:ring-2 focus:ring-indigo-200"
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-semibold text-gray-800">
+                        정산 완료 시 이메일로 알림 받기
+                        <span className="ml-1.5 text-[10px] font-medium text-gray-500 bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5 align-middle">선택 사항</span>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        체크하지 않아도 정산 요청은 정상 접수돼요. 체크하면 담당자가 지급을 완료한 시점에 입력하신 이메일로 안내 메일이 발송돼요.
+                      </div>
+                    </div>
+                  </label>
+                  {wantsEmailNotification && (
+                    <div className="mt-3 pl-6">
+                      <input
+                        type="email"
+                        value={influencerEmailInput}
+                        onChange={e => setInfluencerEmailInput(e.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        disabled={submitting}
+                        autoFocus
+                      />
+                    </div>
+                  )}
+                </div>
+
                 {submitError && (
                   <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">{submitError}</div>
                 )}
@@ -801,7 +936,7 @@
                   </button>
                   <button onClick={submitPayout} disabled={submitting}
                           className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-60 inline-flex items-center gap-1.5">
-                    {submitting ? <><LoaderIcon className="w-4 h-4 animate-spin" /> 요청 중…</> : <>정산 신청</>}
+                    {submitting ? <><LoaderIcon className="w-4 h-4 animate-spin" /> 요청 중…</> : <>정산 요청 보내기</>}
                   </button>
                 </div>
               </div>
@@ -812,17 +947,23 @@
           {resultOpen && resultPayload && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center">
-                <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-4">
+                <div className="w-14 h-14 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
                   <CheckIcon className="w-8 h-8" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">정산 신청이 접수됐어요!</h3>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">정산 요청이 접수됐어요!</h3>
                 <p className="text-sm text-gray-600 mb-5">
-                  담당자 메일로 자동 전달됐고, 아래 일정에 맞춰 지급돼요.
+                  담당자({"sangho.park@catchtable.co.kr"}) 메일로 자동 전달됐어요.<br/>
+                  <span className="text-amber-700 font-semibold">담당자가 확인 후 지급 처리하면</span> 상태가 '지급 완료'로 바뀌고,{" "}
+                  {resultPayload.influencerEmail
+                    ? <><b>{resultPayload.influencerEmail}</b> 으로 완료 알림 메일이 발송돼요.</>
+                    : <>대시보드를 새로고침하면 반영을 확인할 수 있어요.<br/><span className="text-[11px] text-gray-400">(이메일 알림은 선택하지 않으셨어요)</span></>
+                  }
                 </p>
                 <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-4 mb-5 text-left space-y-2 text-sm">
-                  <div className="flex justify-between"><span className="text-gray-600">신청 금액</span><span className="font-bold text-rose-700">{formatKRW(resultPayload.amount)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">현재 상태</span><span className="font-bold text-amber-700">⏳ 매니저 확인중</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">요청 금액</span><span className="font-bold text-rose-700">{formatKRW(resultPayload.amount)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-600">지급 예정일</span><span className="font-bold text-indigo-700">{formatDateKR(resultPayload.payoutDate)}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-600">신청 일시</span><span className="text-gray-800">{new Date(resultPayload.clickedAt).toLocaleString("ko-KR")}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">요청 일시</span><span className="text-gray-800">{new Date(resultPayload.clickedAt).toLocaleString("ko-KR")}</span></div>
                 </div>
                 <button onClick={() => setResultOpen(false)}
                         className="w-full px-4 py-3 rounded-xl bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700">
@@ -836,6 +977,189 @@
             문의: sangho.park@catchtable.co.kr
           </footer>
         </div>
+      );
+    }
+
+    // ---- 매니저 전용: 정산 요청 대기 섹션 ----
+    function ManagerPendingPayouts({ apiUrl }) {
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState("");
+      const [pending, setPending] = useState([]);
+      const [completed, setCompleted] = useState([]);
+      const [confirmTarget, setConfirmTarget] = useState(null); // row object or null
+      const [processing, setProcessing] = useState(false);
+      const [resultMsg, setResultMsg] = useState("");
+
+      const load = async () => {
+        if (!apiUrl) { setLoading(false); return; }
+        setLoading(true); setError("");
+        try {
+          const data = await fetchManagerDataFromAppsScript(apiUrl);
+          setPending(Array.isArray(data.pending) ? data.pending : []);
+          setCompleted(Array.isArray(data.completed) ? data.completed : []);
+        } catch (e) {
+          setError(`정산 요청 로그 불러오기 실패: ${e.message}`);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      useEffect(() => { load(); }, [apiUrl]);
+
+      const confirmPayout = async () => {
+        if (!confirmTarget) return;
+        setProcessing(true); setResultMsg("");
+        try {
+          const resp = await postPayoutToAppsScript(apiUrl, {
+            action: "confirmPayout",
+            rowNumber: confirmTarget.rowNumber,
+          });
+          const emailedMsg = resp.emailed ? " · 인플루언서에게 알림 메일 발송" : " · 인플루언서 이메일 미등록(수동 통보 필요)";
+          setResultMsg(`✓ ${confirmTarget.influencer} ${resp.nth}차 정산 완료 처리됨${emailedMsg}`);
+          setPending(prev => prev.filter(p => p.rowNumber !== confirmTarget.rowNumber));
+          setCompleted(prev => [{ ...confirmTarget, status: "지급 완료" }, ...prev].slice(0, 30));
+          setConfirmTarget(null);
+        } catch (e) {
+          setResultMsg(`✗ 처리 실패: ${e.message}`);
+        } finally {
+          setProcessing(false);
+        }
+      };
+
+      const totalPendingAmount = pending.reduce((a, p) => a + Number(p.amount || 0), 0);
+
+      if (!apiUrl) return null;
+
+      return (
+        <>
+          <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 shadow-sm p-5 mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-amber-500 text-white">
+                  <MoneyIcon className="w-5 h-5" />
+                </span>
+                <div>
+                  <h2 className="text-sm font-bold text-amber-900">⏳ 정산 요청 대기</h2>
+                  <p className="text-xs text-amber-700">
+                    {loading
+                      ? "불러오는 중…"
+                      : pending.length > 0
+                        ? `${pending.length}건 · 합계 ${formatKRW(totalPendingAmount)}`
+                        : "처리할 요청 없음"}
+                  </p>
+                </div>
+              </div>
+              <button onClick={load} disabled={loading}
+                      className="text-xs text-amber-700 hover:text-amber-900 inline-flex items-center gap-1 disabled:opacity-50">
+                <RefreshIcon className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> 새로고침
+              </button>
+            </div>
+
+            {resultMsg && (
+              <div className={`mb-3 text-xs rounded-lg p-2.5 ${
+                resultMsg.startsWith("✓")
+                  ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+                  : "bg-red-50 border border-red-200 text-red-700"
+              }`}>{resultMsg}</div>
+            )}
+
+            {error && (
+              <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2.5">
+                {error}
+              </div>
+            )}
+
+            {!loading && !error && pending.length === 0 && (
+              <div className="text-center py-4 text-xs text-gray-500">
+                대기 중인 정산 요청이 없어요. 인플루언서가 [정산 요청하기]를 누르면 여기에 떠요.
+              </div>
+            )}
+
+            {pending.length > 0 && (
+              <ul className="space-y-2">
+                {pending.map(p => (
+                  <li key={p.rowNumber}
+                      className="flex items-center justify-between gap-3 bg-white rounded-xl border border-amber-200 p-3 hover:shadow-sm">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-gray-900">{p.influencer}</span>
+                        <span className="text-xs text-gray-500">
+                          {p.requestedAt ? new Date(p.requestedAt).toLocaleString("ko-KR") : ""} 요청
+                        </span>
+                        {p.email && (
+                          <span className="text-xs text-indigo-600 truncate max-w-[200px]">· {p.email}</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        콘텐츠 {p.videoCount}개 · 클릭 {formatNumber(p.clickCount)}회 · 지급예정 {formatDateKR(p.payoutDate)}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <button onClick={() => setConfirmTarget(p)}
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 shadow-sm">
+                        <CheckIcon className="w-4 h-4" /> {formatKRW(p.amount)} 정산 완료
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* 최근 완료 내역 (접이식) */}
+            {completed.length > 0 && (
+              <details className="mt-4 group">
+                <summary className="text-xs text-amber-700 cursor-pointer hover:text-amber-900 inline-flex items-center gap-1 select-none">
+                  최근 처리 완료 ({completed.length}건) ▾
+                </summary>
+                <ul className="mt-2 space-y-1 text-xs">
+                  {completed.slice(0, 10).map(c => (
+                    <li key={c.rowNumber} className="flex justify-between text-gray-600 py-0.5">
+                      <span>
+                        <span className="inline-block w-12 text-emerald-600 font-semibold">✓완료</span>
+                        {c.influencer} · {c.requestedAt ? new Date(c.requestedAt).toLocaleDateString("ko-KR") : ""}
+                      </span>
+                      <span className="tabular-nums">{formatKRW(c.amount)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+
+          {/* 정산 완료 확인 모달 */}
+          {confirmTarget && (
+            <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                <h3 className="text-lg font-bold text-gray-900 mb-3">정산 완료 처리</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  <span className="font-semibold text-amber-700">실제로 송금을 완료하셨나요?</span><br/>
+                  확인하면 되돌릴 수 없어요.
+                </p>
+                <ul className="text-xs text-gray-600 mb-4 space-y-1 pl-4 list-disc">
+                  <li>시트 '처리 상태' → <b className="text-emerald-700">지급 완료</b>로 업데이트</li>
+                  <li>인플루언서에게 <b>N차 정산 완료 알림 메일</b> 자동 발송 {confirmTarget.email ? `(${confirmTarget.email})` : "(이메일 미등록)"}</li>
+                  <li>인플루언서 대시보드에 '지급 완료' 반영</li>
+                </ul>
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4 space-y-2 text-sm">
+                  <div className="flex justify-between"><span className="text-gray-500">인플루언서</span><span className="font-semibold">{confirmTarget.influencer}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">금액</span><span className="font-bold text-rose-700">{formatKRW(confirmTarget.amount)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">요청일</span><span>{confirmTarget.requestedAt ? new Date(confirmTarget.requestedAt).toLocaleString("ko-KR") : "—"}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-500">알림 이메일</span><span className="text-xs text-gray-700">{confirmTarget.email || "(미등록)"}</span></div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button onClick={() => setConfirmTarget(null)} disabled={processing}
+                          className="px-4 py-2 rounded-xl border border-gray-300 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50">
+                    취소
+                  </button>
+                  <button onClick={confirmPayout} disabled={processing}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60 inline-flex items-center gap-1.5">
+                    {processing ? <><LoaderIcon className="w-4 h-4 animate-spin" /> 처리 중…</> : <>네, 정산 완료로 처리</>}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       );
     }
 
@@ -1114,6 +1438,9 @@
                 </div>
               )}
             </header>
+
+            {/* 매니저용: 정산 요청 대기 섹션 (최상단 고정) */}
+            <ManagerPendingPayouts apiUrl={appsScriptUrl} />
 
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
               <div className="flex items-center justify-between mb-4">

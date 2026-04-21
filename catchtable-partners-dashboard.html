@@ -18,7 +18,7 @@
   <div id="root"></div>
   <script type="text/babel" data-presets="react">
     const { useState, useMemo, useEffect, useRef } = React;
-
+ 
     // ---- localStorage 키 ----
     const KEY_CLIENT_ID       = "ct-partners:clientId";
     const KEY_YT_API_KEY      = "ct-partners:ytApiKey";
@@ -28,7 +28,7 @@
     const KEY_APPS_SCRIPT_URL = "ct-partners:appsScriptUrl";
     const KEY_PAYOUT_LOG      = "ct-partners:payoutLog";
     const KEY_INFLUENCER_EMAIL = "ct-partners:influencerEmail"; // per-influencer 키로 저장: `${KEY}:${name}`
-
+ 
     const DEFAULT_SHEET_ID = "1rYBgdB7n3R9WYNyzrBr01ArDjNQ8ie14Uuw-2q3N7tc";
     const DEFAULT_SHEET_GID = "1947202841";
     const DEFAULT_INCENTIVE = 100;
@@ -36,7 +36,7 @@
     const DEFAULT_CLIENT_ID = "181610504543-8gpsu1gnciqhkkpbvee70ns506h679lt.apps.googleusercontent.com";
     const DEFAULT_YT_API_KEY = "AIzaSyBt-bW2HlywgbtdeVUqgPGwaHVar2umGZs";
     const DEFAULT_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwrSrwzP8VHY_SMNe9WyvsyIr-TAfYHBMreensQPOEOrLddRwmqRQPDQaiJ_-FjyLMG0A/exec";
-
+ 
     // ---- URL 파라미터 ----
     const urlParams = typeof window !== "undefined"
       ? new URLSearchParams(window.location.search)
@@ -44,7 +44,7 @@
     const URL_INFLUENCER = urlParams.get("influencer") || "";
     const URL_API        = urlParams.get("api") || "";
     const IS_INFLUENCER_MODE = !!URL_INFLUENCER;
-
+ 
     // ---- 아이콘 ----
     const Icon = ({ path, className = "w-5 h-5" }) => (
       <svg className={className} fill="none" stroke="currentColor" strokeWidth="2"
@@ -70,7 +70,7 @@
     const TrophyIcon   = (p) => <Icon {...p} path={<><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4z"/><path d="M7 4H4v3a3 3 0 0 0 3 3M17 4h3v3a3 3 0 0 1-3 3"/></>} />;
     const DownloadIcon = (p) => <Icon {...p} path={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></>} />;
     const LogoutIcon   = (p) => <Icon {...p} path={<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></>} />;
-
+ 
     // ---- 헬퍼 ----
     function extractVideoId(input) {
       if (!input) return null;
@@ -112,7 +112,7 @@
       const n = Number(s);
       return Number.isNaN(n) ? 0 : n;
     }
-
+ 
     // ---- 정산 주기 계산 ----
     // 규칙:
     //  사이클 A: 매월 둘째주 수요일 ~ 월말일  → 지급일 = 익월 둘째주 수요일
@@ -158,7 +158,7 @@
       const day = String(x.getDate()).padStart(2, "0");
       return `${y}-${m}-${day} (${WEEKDAY_KR[x.getDay()]})`;
     }
-
+ 
     // ---- Apps Script 웹훅 ----
     async function fetchInfluencerDataFromAppsScript(apiUrl, influencer) {
       if (!apiUrl) throw new Error("Apps Script URL이 설정되지 않았습니다.");
@@ -191,7 +191,7 @@
       if (json.error) throw new Error(json.error);
       return json;
     }
-
+ 
     // ---- 인플루언서 공유 링크 생성 ----
     function buildInfluencerShareUrl(influencerName, apiUrl) {
       const base = typeof window !== "undefined"
@@ -202,11 +202,11 @@
       if (apiUrl) params.set("api", apiUrl);
       return `${base}?${params.toString()}`;
     }
-
+ 
     // ---- 시트 파싱 ----
     function parseSheetRows(rows) {
       if (!rows || rows.length === 0) return { items: [], headerIdx: -1 };
-
+ 
       let headerIdx = -1;
       let headerRow = null;
       for (let i = 0; i < rows.length; i++) {
@@ -217,25 +217,25 @@
         }
       }
       if (headerIdx < 0) return { items: [], headerIdx: -1, error: "시트에서 '링크삽입일' 헤더를 찾지 못했습니다." };
-
+ 
       const col = {};
       headerRow.forEach((c, i) => { col[String(c || "").trim()] = i; });
-
+ 
       const items = [];
       let currentInfluencer = null;
-
+ 
       for (let i = headerIdx + 1; i < rows.length; i++) {
         const row = rows[i] || [];
         const first = String(row[0] || "").trim();
-
+ 
         if (!first && row.every(c => !String(c || "").trim())) continue;
         if (/^TOTAL/i.test(first)) continue;
-
+ 
         const looksLikeGroup = /\(\s*[\d.]+\s*만\s*\)/.test(first) || /youtube\.com\//.test(first) || /@[\w_-]+/.test(first);
         const hasContentLink = col["콘텐츠 링크"] !== undefined && row[col["콘텐츠 링크"]] && String(row[col["콘텐츠 링크"]]).trim();
         const hasStoreLink   = col["매장 링크"] !== undefined && row[col["매장 링크"]] && String(row[col["매장 링크"]]).trim();
         const hasStore       = col["매장"] !== undefined && row[col["매장"]] && String(row[col["매장"]]).trim();
-
+ 
         if (looksLikeGroup && !hasContentLink && !hasStoreLink && !hasStore) {
           const m = first.match(/^([^(（]+?)\s*[\(（]\s*([\d.]+)\s*만\s*[\)）]/);
           const name = m ? m[1].trim() : first.split(/\s+/)[0].replace(/\(.*\)/g, "").trim();
@@ -244,12 +244,12 @@
           currentInfluencer = { name, subscribers: subs, channelUrl: urlMatch ? urlMatch[0] : "" };
           continue;
         }
-
+ 
         if (!hasStore && !hasContentLink && !hasStoreLink) continue;
-
+ 
         const get = (k) => col[k] !== undefined ? row[col[k]] : undefined;
         const contentUrl = String(get("콘텐츠 링크") || "").trim();
-
+ 
         items.push({
           influencer: currentInfluencer?.name || "(미지정)",
           influencerSubs: currentInfluencer?.subscribers || "",
@@ -275,10 +275,10 @@
           videoId: extractVideoId(contentUrl),
         });
       }
-
+ 
       return { items, headerIdx };
     }
-
+ 
     // ---- YouTube 배치 ----
     async function fetchYoutubeBatch(videoIds, apiKey) {
       if (!videoIds || videoIds.length === 0) return {};
@@ -294,7 +294,7 @@
       }
       return map;
     }
-
+ 
     // ---- Sheets API ----
     async function fetchSheetMeta(sheetId, accessToken) {
       const res = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}?fields=sheets(properties(sheetId,title))`, {
@@ -313,7 +313,7 @@
       if (!res.ok) throw new Error(json?.error?.message || `Sheets values HTTP ${res.status}`);
       return json.values || [];
     }
-
+ 
     // ---- 컴포넌트 ----
     function KpiCard({ icon: IconComp, label, value, accent, subtitle }) {
       return (
@@ -329,11 +329,17 @@
         </div>
       );
     }
-
-    function InfluencerCard({ group, appsScriptUrl }) {
+ 
+    function InfluencerCard({ group, appsScriptUrl, pendingForThis = [], completedForThis = [], onPayoutUpdate }) {
       const [copied, setCopied] = useState(false);
       const clickRate = group.totalViews ? (group.totalClicks / group.totalViews * 100) : 0;
       const reservationRate = group.totalClicks ? (group.totalReservations / group.totalClicks * 100) : 0;
+ 
+      // 정산 처리 상태 (완료 or 취소 공용 모달)
+      const [confirmTarget, setConfirmTarget] = useState(null); // { row, action: 'confirm'|'cancel' }
+      const [processing, setProcessing] = useState(false);
+      const [resultMsg, setResultMsg] = useState("");
+ 
       const copyShareLink = async () => {
         const shareUrl = buildInfluencerShareUrl(group.name, appsScriptUrl);
         try {
@@ -341,11 +347,43 @@
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         } catch(e) {
-          // 폴백: prompt로 표시
           window.prompt("아래 URL을 복사해 인플루언서에게 전달하세요:", shareUrl);
         }
       };
+ 
+      const runAction = async () => {
+        if (!confirmTarget) return;
+        setProcessing(true); setResultMsg("");
+        try {
+          const actionName = confirmTarget.action === "confirm" ? "confirmPayout" : "cancelPayout";
+          const resp = await postPayoutToAppsScript(appsScriptUrl, {
+            action: actionName,
+            rowNumber: confirmTarget.row.rowNumber,
+          });
+          if (confirmTarget.action === "confirm") {
+            const emailedMsg = resp.emailed
+              ? " · 인플루언서에게 알림 메일 발송"
+              : " · 이메일 미등록(수동 통보 필요)";
+            setResultMsg(`✓ ${confirmTarget.row.influencer} ${resp.nth}차 정산 완료${emailedMsg}`);
+          } else {
+            setResultMsg(`✓ ${confirmTarget.row.influencer} 요청 취소 처리됨`);
+          }
+          setConfirmTarget(null);
+          if (onPayoutUpdate) await onPayoutUpdate();
+          // 3초 후 메시지 자동 숨김
+          setTimeout(() => setResultMsg(""), 5000);
+        } catch (e) {
+          setResultMsg(`✗ 처리 실패: ${e.message}`);
+        } finally {
+          setProcessing(false);
+        }
+      };
+ 
+      const totalPendingAmount = pendingForThis.reduce((a, p) => a + Number(p.amount || 0), 0);
+      const isOverflowing = totalPendingAmount > group.totalIncentive + 1 && pendingForThis.length > 0;
+ 
       return (
+        <>
         <div className="rounded-2xl border border-gray-200 bg-white shadow-sm p-5">
           <div className="flex items-baseline justify-between mb-3">
             <div>
@@ -357,6 +395,97 @@
                  className="text-xs font-medium text-indigo-600 hover:underline">채널 →</a>
             )}
           </div>
+ 
+          {/* 처리 결과 메시지 */}
+          {resultMsg && (
+            <div className={`mb-3 text-xs rounded-lg p-2.5 ${
+              resultMsg.startsWith("✓")
+                ? "bg-emerald-50 border border-emerald-200 text-emerald-800"
+                : "bg-red-50 border border-red-200 text-red-700"
+            }`}>{resultMsg}</div>
+          )}
+ 
+          {/* 정산 요청 대기 섹션 (요청이 있을 때만) */}
+          {pendingForThis.length > 0 && (
+            <div className={`mb-4 rounded-xl border-2 p-3 ${
+              isOverflowing
+                ? "border-red-300 bg-red-50"
+                : "border-amber-300 bg-amber-50"
+            }`}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-1.5">
+                  <MoneyIcon className={`w-4 h-4 ${isOverflowing ? "text-red-600" : "text-amber-700"}`} />
+                  <span className={`text-xs font-bold ${isOverflowing ? "text-red-800" : "text-amber-900"}`}>
+                    ⏳ 정산 요청 대기
+                  </span>
+                  <span className={`text-xs ${isOverflowing ? "text-red-700" : "text-amber-700"}`}>
+                    · {pendingForThis.length}건 · 합계 {formatKRW(totalPendingAmount)}
+                  </span>
+                </div>
+              </div>
+ 
+              {isOverflowing && (
+                <div className="mb-2 text-[11px] text-red-700 bg-white border border-red-200 rounded-md p-2">
+                  ⚠️ 요청 합계({formatKRW(totalPendingAmount)})가 누적 인센티브({formatKRW(group.totalIncentive)})를 초과해요.
+                  중복 요청일 수 있으니 불필요한 건은 <b>취소</b> 처리해주세요.
+                </div>
+              )}
+ 
+              <ul className="space-y-2">
+                {pendingForThis.map(p => (
+                  <li key={p.rowNumber} className="bg-white rounded-lg border border-gray-200 p-2.5">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="text-xs text-gray-600 flex-1 min-w-0">
+                        <div className="text-gray-900">
+                          {p.requestedAt ? new Date(p.requestedAt).toLocaleString("ko-KR") : ""} 요청
+                        </div>
+                        <div className="text-[11px] text-gray-500 truncate">
+                          콘텐츠 {p.videoCount}개 · 클릭 {formatNumber(p.clickCount)}회 · 지급예정 {formatDateKR(p.payoutDate)}
+                          {p.email && ` · ${p.email}`}
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-sm font-bold text-rose-700 tabular-nums">{formatKRW(p.amount)}</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-1.5 mt-2">
+                      <button
+                        onClick={() => setConfirmTarget({ row: p, action: "confirm" })}
+                        disabled={processing}
+                        className="flex-1 inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 disabled:opacity-50"
+                      >
+                        <CheckIcon className="w-3.5 h-3.5" /> {formatKRW(p.amount)} 정산 완료
+                      </button>
+                      <button
+                        onClick={() => setConfirmTarget({ row: p, action: "cancel" })}
+                        disabled={processing}
+                        className="inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 text-xs font-semibold hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        취소
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+ 
+              {completedForThis.length > 0 && (
+                <details className="mt-2 group">
+                  <summary className="text-[11px] text-amber-700 cursor-pointer hover:text-amber-900 select-none">
+                    최근 처리 완료 ({completedForThis.length}건) ▾
+                  </summary>
+                  <ul className="mt-1 space-y-0.5 text-[11px]">
+                    {completedForThis.slice(0, 5).map(c => (
+                      <li key={c.rowNumber} className="flex justify-between text-gray-600">
+                        <span><span className="text-emerald-600 font-semibold">✓</span> {c.requestedAt ? new Date(c.requestedAt).toLocaleDateString("ko-KR") : ""}</span>
+                        <span className="tabular-nums">{formatKRW(c.amount)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+ 
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
               <div className="text-xs text-gray-500">총 조회</div>
@@ -389,9 +518,74 @@
               : <><UserIcon className="w-3.5 h-3.5" /> 인플루언서 정산 링크 복사</>}
           </button>
         </div>
+ 
+        {/* 확인 모달 (완료 or 취소 공용) */}
+        {confirmTarget && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+              {confirmTarget.action === "confirm" ? (
+                <>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">정산 완료 처리</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    <span className="font-semibold text-amber-700">실제로 송금을 완료하셨나요?</span><br/>
+                    확인하면 되돌릴 수 없어요.
+                  </p>
+                  <ul className="text-xs text-gray-600 mb-4 space-y-1 pl-4 list-disc">
+                    <li>시트 '처리 상태' → <b className="text-emerald-700">지급 완료</b></li>
+                    <li>인플루언서에게 N차 정산 완료 <b>알림 메일</b> 자동 발송 {confirmTarget.row.email ? `(${confirmTarget.row.email})` : "(이메일 미등록)"}</li>
+                    <li>인플루언서 대시보드에 '지급 완료' 반영</li>
+                  </ul>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-bold text-gray-900 mb-3">정산 요청 취소</h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    이 요청을 <span className="font-semibold text-gray-900">취소</span> 처리할까요?<br/>
+                    <span className="text-[11px] text-gray-500">(중복 요청이거나 잘못된 요청일 때 사용하세요)</span>
+                  </p>
+                  <ul className="text-xs text-gray-600 mb-4 space-y-1 pl-4 list-disc">
+                    <li>시트 '처리 상태' → <b className="text-gray-700">취소</b></li>
+                    <li>인플루언서에게 알림 메일 <b>보내지 않음</b> (필요 시 별도 안내)</li>
+                    <li>인플루언서 대시보드의 '요청중' 에서 해당 건 제거</li>
+                  </ul>
+                </>
+              )}
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 mb-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">인플루언서</span><span className="font-semibold">{confirmTarget.row.influencer}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">금액</span><span className="font-bold text-rose-700">{formatKRW(confirmTarget.row.amount)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">요청일</span><span>{confirmTarget.row.requestedAt ? new Date(confirmTarget.row.requestedAt).toLocaleString("ko-KR") : "—"}</span></div>
+                {confirmTarget.action === "confirm" && (
+                  <div className="flex justify-between"><span className="text-gray-500">알림 이메일</span><span className="text-xs text-gray-700">{confirmTarget.row.email || "(미등록)"}</span></div>
+                )}
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setConfirmTarget(null)} disabled={processing}
+                        className="px-4 py-2 rounded-xl border border-gray-300 text-sm font-semibold hover:bg-gray-50 disabled:opacity-50">
+                  닫기
+                </button>
+                <button
+                  onClick={runAction}
+                  disabled={processing}
+                  className={`px-4 py-2 rounded-xl text-white text-sm font-semibold disabled:opacity-60 inline-flex items-center gap-1.5 ${
+                    confirmTarget.action === "confirm"
+                      ? "bg-emerald-600 hover:bg-emerald-700"
+                      : "bg-gray-700 hover:bg-gray-800"
+                  }`}
+                >
+                  {processing
+                    ? <><LoaderIcon className="w-4 h-4 animate-spin" /> 처리 중…</>
+                    : confirmTarget.action === "confirm"
+                      ? <>네, 정산 완료로 처리</>
+                      : <>네, 요청 취소</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
       );
     }
-
+ 
     function RankingList({ title, icon: IconComp, accent, items, valueKey, valueLabel, formatFn }) {
       const sorted = [...items]
         .filter(x => Number(x[valueKey]) > 0)
@@ -430,7 +624,7 @@
         </div>
       );
     }
-
+ 
     function exportToExcel(items) {
       if (typeof XLSX === "undefined") { alert("엑셀 라이브러리를 불러오지 못했습니다."); return; }
       const rows = items.map(it => {
@@ -471,7 +665,7 @@
       const fname = `catchtable-partners-${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.xlsx`;
       XLSX.writeFile(wb, fname);
     }
-
+ 
     // ---- 인플루언서 전용 뷰 ----
     function InfluencerView({ influencerName, apiUrl }) {
       const [loading, setLoading] = useState(true);
@@ -481,21 +675,21 @@
       const [fetchedAt, setFetchedAt] = useState(null);
       // Apps Script에서 받아온 지난 정산 요청 내역 (시트의 '정산 요청 로그' 탭)
       const [serverPayoutLog, setServerPayoutLog] = useState([]);
-
+ 
       // 정산 모달 상태
       const [confirmOpen, setConfirmOpen] = useState(false);
       const [submitting, setSubmitting] = useState(false);
       const [resultOpen, setResultOpen] = useState(false);
       const [resultPayload, setResultPayload] = useState(null);
       const [submitError, setSubmitError] = useState("");
-
+ 
       // 정산 로그 (로컬)
       const [localLog, setLocalLog] = useState([]);
-
+ 
       // 인플루언서 이메일 (정산 완료 시 자동 알림 수신용) — per-influencer 로 캐시, 선택 사항
       const [wantsEmailNotification, setWantsEmailNotification] = useState(false);
       const [influencerEmailInput, setInfluencerEmailInput] = useState("");
-
+ 
       useEffect(() => {
         try {
           const raw = localStorage.getItem(KEY_PAYOUT_LOG);
@@ -507,7 +701,7 @@
           setWantsEmailNotification(!!savedEmail);
         } catch(e) {}
       }, [influencerName]);
-
+ 
       const load = async () => {
         setLoading(true); setError("");
         try {
@@ -535,7 +729,7 @@
           setLoading(false);
         }
       };
-
+ 
       useEffect(() => {
         if (!apiUrl) {
           setLoading(false);
@@ -544,14 +738,14 @@
         }
         load();
       }, []);
-
+ 
       const totals = useMemo(() => {
         const totalClicks = items.reduce((a,it) => a + it.clicks, 0);
         const totalIncentive = items.reduce((a,it) => a + it.incentive, 0);
         const totalViews = items.reduce((a,it) => a + (it.apiViews !== null ? it.apiViews : it.sheetViews), 0);
         return { totalClicks, totalIncentive, totalViews, videoCount: items.length };
       }, [items]);
-
+ 
       // 정산 로그를 상태별로 분리:
       //  - '지급 완료' (paid): 실제 입금 완료된 건
       //  - '요청 접수' (requested): 인플루언서가 요청했으나 아직 매니저가 처리 전
@@ -564,7 +758,7 @@
           payoutCount: paid.length,
         };
       }, [serverPayoutLog]);
-
+ 
       const requestedSummary = useMemo(() => {
         const req = serverPayoutLog.filter(r => String(r.status || "").trim() === "요청 접수");
         return {
@@ -573,7 +767,7 @@
           requestCount:    req.length,
         };
       }, [serverPayoutLog]);
-
+ 
       // 요청 가능한 금액 = 누적 인센티브 - (이미 지급 완료 + 요청중)
       const available = useMemo(() => {
         const availableAmount = Math.max(0,
@@ -582,12 +776,12 @@
           totals.totalClicks - paidSummary.paidClicks - requestedSummary.requestedClicks);
         return { availableAmount, availableClicks };
       }, [totals, paidSummary, requestedSummary]);
-
+ 
       const payoutDate = useMemo(() => calculatePayoutDate(new Date()), []);
-
+ 
       const submitPayout = async () => {
         setSubmitting(true); setSubmitError("");
-
+ 
         // 이메일은 선택 사항 — 체크박스가 ON일 때만 사용
         const email = wantsEmailNotification ? (influencerEmailInput || "").trim() : "";
         if (wantsEmailNotification) {
@@ -602,7 +796,7 @@
             return;
           }
         }
-
+ 
         try {
           const payload = {
             action: "payout",
@@ -621,12 +815,12 @@
             previouslyRequestedAmount: requestedSummary.requestedAmount,
           };
           const resp = await postPayoutToAppsScript(apiUrl, payload);
-
+ 
           // 이메일 캐시 저장
           if (email) {
             try { localStorage.setItem(`${KEY_INFLUENCER_EMAIL}:${influencerName}`, email); } catch(e) {}
           }
-
+ 
           const record = {
             ...payload,
             appsScriptResponse: resp,
@@ -662,7 +856,7 @@
           setSubmitting(false);
         }
       };
-
+ 
       return (
         <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-indigo-50 p-6">
           <div className="max-w-5xl mx-auto">
@@ -684,14 +878,14 @@
                 </button>
               )}
             </header>
-
+ 
             {loading && (
               <div className="rounded-2xl border border-gray-200 bg-white p-10 text-center">
                 <LoaderIcon className="w-8 h-8 text-indigo-500 animate-spin mx-auto mb-3" />
                 <p className="text-sm text-gray-600">데이터를 불러오는 중이에요…</p>
               </div>
             )}
-
+ 
             {error && (
               <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                 <AlertIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -701,7 +895,7 @@
                 </div>
               </div>
             )}
-
+ 
             {!loading && !error && items.length > 0 && (
               <>
                 {/* 메인 정산 카드 */}
@@ -713,7 +907,7 @@
                       <p className="text-sm text-indigo-200 mt-2">
                         신규 클릭 {formatNumber(available.availableClicks)}회 · 콘텐츠 {totals.videoCount}개
                       </p>
-
+ 
                       {/* 3단 breakdown: 누적 / 요청중 / 지급완료 */}
                       <div className="mt-4 pt-4 border-t border-indigo-400/40 grid grid-cols-3 gap-3 text-xs">
                         <div>
@@ -764,7 +958,7 @@
                     </div>
                   </div>
                 </div>
-
+ 
                 {/* 서버 정산 로그 (상태별 표시) */}
                 {serverPayoutLog.length > 0 && (
                   <div className="mb-6 rounded-2xl border border-gray-200 bg-white p-5">
@@ -802,7 +996,7 @@
                     </ul>
                   </div>
                 )}
-
+ 
                 {/* 영상별 상세 */}
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
                   <h3 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
@@ -853,7 +1047,7 @@
                     </table>
                   </div>
                 </div>
-
+ 
                 {/* 정산 주기 안내 */}
                 <div className="rounded-2xl border border-gray-200 bg-white p-5 text-xs text-gray-600">
                   <h4 className="text-sm font-bold text-gray-900 mb-2">정산 주기 안내</h4>
@@ -866,7 +1060,7 @@
               </>
             )}
           </div>
-
+ 
           {/* 확인 모달 */}
           {confirmOpen && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -890,7 +1084,7 @@
                   <div className="flex justify-between border-t pt-2 mt-2"><span className="text-gray-700">이번 요청 금액</span><span className="font-bold text-rose-700 text-lg">{formatKRW(available.availableAmount)}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">지급 예정일</span><span className="font-semibold">{formatDateKR(payoutDate)}</span></div>
                 </div>
-
+ 
                 {/* 이메일 알림 (선택 사항) */}
                 <div className="mb-4 rounded-xl border border-gray-200 bg-white p-3">
                   <label className="flex items-start gap-2 cursor-pointer">
@@ -925,7 +1119,7 @@
                     </div>
                   )}
                 </div>
-
+ 
                 {submitError && (
                   <div className="mb-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">{submitError}</div>
                 )}
@@ -942,7 +1136,7 @@
               </div>
             </div>
           )}
-
+ 
           {/* 결과 모달 */}
           {resultOpen && resultPayload && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -972,16 +1166,18 @@
               </div>
             </div>
           )}
-
+ 
           <footer className="mt-8 text-center text-xs text-gray-400">
             문의: sangho.park@catchtable.co.kr
           </footer>
         </div>
       );
     }
-
-    // ---- 매니저 전용: 정산 요청 대기 섹션 ----
-    function ManagerPendingPayouts({ apiUrl }) {
+ 
+    // ---- (deprecated) 매니저 전용: 정산 요청 대기 섹션 ----
+    // 2026-04-21 이후 이 컴포넌트는 사용하지 않음. 인플루언서 카드 내부에 통합됨.
+    // eslint-disable-next-line no-unused-vars
+    function ManagerPendingPayouts_Deprecated({ apiUrl }) {
       const [loading, setLoading] = useState(true);
       const [error, setError] = useState("");
       const [pending, setPending] = useState([]);
@@ -989,7 +1185,7 @@
       const [confirmTarget, setConfirmTarget] = useState(null); // row object or null
       const [processing, setProcessing] = useState(false);
       const [resultMsg, setResultMsg] = useState("");
-
+ 
       const load = async () => {
         if (!apiUrl) { setLoading(false); return; }
         setLoading(true); setError("");
@@ -1003,9 +1199,9 @@
           setLoading(false);
         }
       };
-
+ 
       useEffect(() => { load(); }, [apiUrl]);
-
+ 
       const confirmPayout = async () => {
         if (!confirmTarget) return;
         setProcessing(true); setResultMsg("");
@@ -1025,11 +1221,11 @@
           setProcessing(false);
         }
       };
-
+ 
       const totalPendingAmount = pending.reduce((a, p) => a + Number(p.amount || 0), 0);
-
+ 
       if (!apiUrl) return null;
-
+ 
       return (
         <>
           <div className="rounded-2xl border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-orange-50 shadow-sm p-5 mb-6">
@@ -1054,7 +1250,7 @@
                 <RefreshIcon className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} /> 새로고침
               </button>
             </div>
-
+ 
             {resultMsg && (
               <div className={`mb-3 text-xs rounded-lg p-2.5 ${
                 resultMsg.startsWith("✓")
@@ -1062,19 +1258,19 @@
                   : "bg-red-50 border border-red-200 text-red-700"
               }`}>{resultMsg}</div>
             )}
-
+ 
             {error && (
               <div className="mb-3 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg p-2.5">
                 {error}
               </div>
             )}
-
+ 
             {!loading && !error && pending.length === 0 && (
               <div className="text-center py-4 text-xs text-gray-500">
                 대기 중인 정산 요청이 없어요. 인플루언서가 [정산 요청하기]를 누르면 여기에 떠요.
               </div>
             )}
-
+ 
             {pending.length > 0 && (
               <ul className="space-y-2">
                 {pending.map(p => (
@@ -1104,7 +1300,7 @@
                 ))}
               </ul>
             )}
-
+ 
             {/* 최근 완료 내역 (접이식) */}
             {completed.length > 0 && (
               <details className="mt-4 group">
@@ -1125,7 +1321,7 @@
               </details>
             )}
           </div>
-
+ 
           {/* 정산 완료 확인 모달 */}
           {confirmTarget && (
             <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -1162,7 +1358,7 @@
         </>
       );
     }
-
+ 
     // ---- 메인 ----
     function App() {
       const [clientId, setClientId] = useState("");
@@ -1171,25 +1367,25 @@
       const [sheetGid, setSheetGid] = useState(DEFAULT_SHEET_GID);
       const [appsScriptUrl, setAppsScriptUrl] = useState("");
       const [incentivePerClick, setIncentivePerClick] = useState(DEFAULT_INCENTIVE);
-
+ 
       const [accessToken, setAccessToken] = useState(null);
       const [tokenExpiry, setTokenExpiry] = useState(0);
       const [userEmail, setUserEmail] = useState("");
-
+ 
       const [loading, setLoading] = useState(false);
       const [status, setStatus] = useState("");
       const [error, setError] = useState("");
       const [items, setItems] = useState([]);
       const [lastFetched, setLastFetched] = useState(null);
-
+ 
       const tokenClientRef = useRef(null);
       const [gisReady, setGisReady] = useState(
         typeof window !== "undefined" && !!window.google?.accounts?.oauth2
       );
-
+ 
       const [configLoaded, setConfigLoaded] = useState(false);
       const [configCollapsed, setConfigCollapsed] = useState(false);
-
+ 
       useEffect(() => {
         try {
           setClientId(localStorage.getItem(KEY_CLIENT_ID) || DEFAULT_CLIENT_ID);
@@ -1202,7 +1398,26 @@
         } catch(e) {}
         setConfigLoaded(true);
       }, []);
-
+ 
+      // 정산 요청/완료 로그 (모든 인플루언서 카드에서 공유) — App 최상위에서 1회 fetch 후 분배
+      const [payoutQueue, setPayoutQueue] = useState({ pending: [], completed: [], loading: false, error: "" });
+      const loadPayoutQueue = async () => {
+        if (!appsScriptUrl) return;
+        setPayoutQueue(q => ({ ...q, loading: true, error: "" }));
+        try {
+          const data = await fetchManagerDataFromAppsScript(appsScriptUrl);
+          setPayoutQueue({
+            pending:   Array.isArray(data.pending)   ? data.pending   : [],
+            completed: Array.isArray(data.completed) ? data.completed : [],
+            loading: false,
+            error: "",
+          });
+        } catch(e) {
+          setPayoutQueue(q => ({ ...q, loading: false, error: e.message }));
+        }
+      };
+      useEffect(() => { if (configLoaded && appsScriptUrl) loadPayoutQueue(); }, [configLoaded, appsScriptUrl]);
+ 
       // 설정값 자동 저장 — 타이핑/붙여넣기 즉시 localStorage 반영
       useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_CLIENT_ID, clientId); } catch(e) {} } }, [clientId, configLoaded]);
       useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_YT_API_KEY, ytApiKey); } catch(e) {} } }, [ytApiKey, configLoaded]);
@@ -1210,7 +1425,7 @@
       useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_SHEET_GID, sheetGid); } catch(e) {} } }, [sheetGid, configLoaded]);
       useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_APPS_SCRIPT_URL, appsScriptUrl); } catch(e) {} } }, [appsScriptUrl, configLoaded]);
       useEffect(() => { if (configLoaded) { try { localStorage.setItem(KEY_INCENTIVE, String(incentivePerClick)); } catch(e) {} } }, [incentivePerClick, configLoaded]);
-
+ 
       // GIS(Google Identity Services) 라이브러리 로드 폴링 — async/defer 로 인한 레이스 컨디션 방지
       useEffect(() => {
         if (gisReady) return;
@@ -1225,7 +1440,7 @@
         check();
         return () => { if (timer) clearTimeout(timer); };
       }, [gisReady]);
-
+ 
       const initTokenClient = () => {
         if (!clientId) return false;
         if (!window.google?.accounts?.oauth2) return false;
@@ -1251,12 +1466,12 @@
           return false;
         }
       };
-
+ 
       useEffect(() => {
         if (!gisReady || !clientId) return;
         initTokenClient();
       }, [clientId, gisReady]);
-
+ 
       const signIn = () => {
         if (!clientId) { setError("Google OAuth 클라이언트 ID를 먼저 입력해주세요."); return; }
         // 혹시 아직 초기화가 안 됐다면 즉석에서 한 번 더 시도
@@ -1274,42 +1489,42 @@
         try { localStorage.setItem(KEY_CLIENT_ID, clientId); } catch(e) {}
         tokenClientRef.current.requestAccessToken();
       };
-
+ 
       const signOut = () => {
         if (accessToken && window.google?.accounts?.oauth2) {
           window.google.accounts.oauth2.revoke(accessToken, () => {});
         }
         setAccessToken(null); setTokenExpiry(0); setUserEmail(""); setItems([]);
       };
-
+ 
       const loadData = async () => {
         setError(""); setStatus("");
         if (!accessToken) { setError("먼저 구글 로그인을 해주세요."); return; }
         if (!sheetId) { setError("스프레드시트 ID를 입력해주세요."); return; }
         if (!ytApiKey) { setError("YouTube API 키를 입력해주세요."); return; }
-
+ 
         setLoading(true);
         try {
           setStatus("스프레드시트 메타데이터 조회 중…");
           const meta = await fetchSheetMeta(sheetId, accessToken);
           const targetSheet = meta.sheets.find(s => String(s.properties.sheetId) === String(sheetGid));
           const sheetTitle = targetSheet ? targetSheet.properties.title : meta.sheets[0].properties.title;
-
+ 
           setStatus(`'${sheetTitle}' 탭에서 데이터 가져오는 중…`);
           const values = await fetchSheetValues(sheetId, sheetTitle, accessToken);
-
+ 
           const { items: parsed, error: parseErr } = parseSheetRows(values);
           if (parseErr) { setError(parseErr); setLoading(false); return; }
-
+ 
           setStatus(`${parsed.length}개 콘텐츠 파싱 완료. YouTube 지표 조회 중…`);
-
+ 
           const videoIds = [...new Set(parsed.map(it => it.videoId).filter(Boolean))];
           let ytMap = {};
           if (videoIds.length > 0) {
             try { ytMap = await fetchYoutubeBatch(videoIds, ytApiKey); }
             catch(e) { setError(`YouTube API 조회 실패: ${e.message}`); }
           }
-
+ 
           const enriched = parsed.map(it => {
             if (it.videoId && ytMap[it.videoId]) {
               const v = ytMap[it.videoId];
@@ -1324,11 +1539,11 @@
             }
             return it;
           });
-
+ 
           setItems(enriched);
           setLastFetched(new Date());
           setStatus(`완료 — 콘텐츠 ${enriched.length}개, YouTube 수치 ${Object.keys(ytMap).length}개 수집`);
-
+ 
           try {
             localStorage.setItem(KEY_CLIENT_ID, clientId);
             localStorage.setItem(KEY_YT_API_KEY, ytApiKey);
@@ -1343,7 +1558,7 @@
           setLoading(false);
         }
       };
-
+ 
       const summary = useMemo(() => {
         if (items.length === 0) return null;
         const totalViews = items.reduce((a,it) => a + (it.apiViews !== null ? it.apiViews : it.sheetViews), 0);
@@ -1363,7 +1578,7 @@
           reservationRate: totalClicks ? (totalReservations / totalClicks * 100) : 0,
         };
       }, [items]);
-
+ 
       const influencerGroups = useMemo(() => {
         const map = new Map();
         items.forEach(it => {
@@ -1389,7 +1604,7 @@
         });
         return Array.from(map.values()).sort((a,b) => b.totalClicks - a.totalClicks);
       }, [items]);
-
+ 
       const [sortKey, setSortKey] = useState("clicks");
       const [sortDir, setSortDir] = useState("desc");
       const sortedItems = useMemo(() => {
@@ -1413,9 +1628,9 @@
           {label}{sortKey === k ? (sortDir === "desc" ? " ↓" : " ↑") : ""}
         </th>
       );
-
+ 
       const isLoggedIn = !!accessToken && Date.now() < tokenExpiry;
-
+ 
       return (
         <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-indigo-50 p-6">
           <div className="max-w-7xl mx-auto">
@@ -1438,10 +1653,7 @@
                 </div>
               )}
             </header>
-
-            {/* 매니저용: 정산 요청 대기 섹션 (최상단 고정) */}
-            <ManagerPendingPayouts apiUrl={appsScriptUrl} />
-
+ 
             <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 mb-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1497,7 +1709,7 @@
                 </div>
               </div>
               )}
-
+ 
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {!isLoggedIn ? (
                   <button onClick={signIn}
@@ -1523,7 +1735,7 @@
               </div>
               {status && <p className="mt-2 text-xs text-gray-500">{status}</p>}
             </div>
-
+ 
             {error && (
               <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
                 <AlertIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
@@ -1533,7 +1745,7 @@
                 </div>
               </div>
             )}
-
+ 
             {!isLoggedIn && !items.length && !error && (
               <div className="mb-6 rounded-2xl border border-indigo-200 bg-indigo-50 p-5 text-sm text-indigo-900">
                 <h3 className="font-bold mb-2">처음 사용 안내</h3>
@@ -1545,7 +1757,7 @@
                 </ol>
               </div>
             )}
-
+ 
             {summary && (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
@@ -1562,7 +1774,7 @@
                   <KpiCard icon={MsgIcon}     label="총 댓글" accent="bg-violet-500"
                            value={formatNumber(summary.totalComments)} />
                 </div>
-
+ 
                 <div className="mb-6">
                   <div className="flex items-center justify-between mb-3">
                     <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
@@ -1575,10 +1787,19 @@
                     )}
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {influencerGroups.map(g => <InfluencerCard key={g.name} group={g} appsScriptUrl={appsScriptUrl} />)}
+                    {influencerGroups.map(g => (
+                      <InfluencerCard
+                        key={g.name}
+                        group={g}
+                        appsScriptUrl={appsScriptUrl}
+                        pendingForThis={payoutQueue.pending.filter(p => p.influencer === g.name)}
+                        completedForThis={payoutQueue.completed.filter(c => c.influencer === g.name)}
+                        onPayoutUpdate={loadPayoutQueue}
+                      />
+                    ))}
                   </div>
                 </div>
-
+ 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
                   <RankingList title="클릭 TOP 5" icon={ClickIcon} accent="bg-sky-500"
                                items={items} valueKey="clicks" valueLabel="클릭" />
@@ -1588,7 +1809,7 @@
                                items={items} valueKey="incentive" valueLabel="원"
                                formatFn={(v) => formatKRW(v)} />
                 </div>
-
+ 
                 <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-5">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
@@ -1649,7 +1870,7 @@
                 </div>
               </>
             )}
-
+ 
             <footer className="mt-8 text-center text-xs text-gray-400">
               Google Sheets API · YouTube Data API v3 · 클릭 데이터는 Airbridge 기반 수기 집계
             </footer>
@@ -1657,14 +1878,14 @@
         </div>
       );
     }
-
+ 
     function Root() {
       if (IS_INFLUENCER_MODE) {
         return <InfluencerView influencerName={URL_INFLUENCER} apiUrl={URL_API} />;
       }
       return <App />;
     }
-
+ 
     ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
   </script>
 </body>

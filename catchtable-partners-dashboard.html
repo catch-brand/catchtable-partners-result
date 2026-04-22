@@ -1452,16 +1452,38 @@
           tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
             client_id: clientId,
             scope: "https://www.googleapis.com/auth/spreadsheets.readonly https://www.googleapis.com/auth/userinfo.email",
-            callback: (resp) => {
+            hd: ALLOWED_AUTH_DOMAIN, // Workspace 계정만 계정 선택창에 노출 (힌트)
+            callback: async (resp) => {
               if (resp.error) {
                 setError(`구글 인증 실패: ${resp.error_description || resp.error}`);
                 return;
               }
-              setAccessToken(resp.access_token);
-              setTokenExpiry(Date.now() + (resp.expires_in || 3600) * 1000);
-              fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
-                headers: { Authorization: `Bearer ${resp.access_token}` }
-              }).then(r => r.json()).then(j => setUserEmail(j.email || ""));
+              // 로그인 직후 이메일 도메인 검증 — @catchtable.co.kr 아니면 거절 + 토큰 revoke
+              try {
+                const infoResp = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+                  headers: { Authorization: `Bearer ${resp.access_token}` },
+                });
+                const info = await infoResp.json();
+                const email = String(info.email || "").toLowerCase();
+                if (!email.endsWith("@" + ALLOWED_AUTH_DOMAIN)) {
+                  // 토큰 즉시 revoke (악의적 데이터 접근 차단)
+                  if (window.google?.accounts?.oauth2) {
+                    window.google.accounts.oauth2.revoke(resp.access_token, () => {});
+                  }
+                  setAccessToken(null);
+                  setTokenExpiry(0);
+                  setUserEmail("");
+                  setError(`이 대시보드는 @${ALLOWED_AUTH_DOMAIN} 계정만 사용할 수 있어요. (로그인 시도: ${email || "(알 수 없음)"})`);
+                  return;
+                }
+                // 통과 — 상태 반영
+                setAccessToken(resp.access_token);
+                setTokenExpiry(Date.now() + (resp.expires_in || 3600) * 1000);
+                setUserEmail(info.email || "");
+                setError("");
+              } catch (e) {
+                setError(`사용자 정보 확인 실패: ${e.message}`);
+              }
             },
           });
           return true;
@@ -1883,169 +1905,11 @@
       );
     }
  
-    // ---- Google Sign-In: JWT 디코드 (UTF-8 안전) ----
-    function decodeJwtPayload(token) {
-      try {
-        const payloadB64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
-        // atob 후 바이트 → UTF-8 문자열 복원 (한글 이름 깨짐 방지)
-        const bytes = atob(payloadB64);
-        const utf8 = decodeURIComponent(
-          Array.from(bytes).map(c => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2)).join("")
-        );
-        return JSON.parse(utf8);
-      } catch (e) {
-        return null;
-      }
-    }
- 
-    // ---- 매니저 대시보드 도메인 로그인 게이트 ----
-    function DomainLoginGate({ children }) {
-      const [authUser, setAuthUser] = useState(null); // { email, name, picture, token }
-      const [authError, setAuthError] = useState("");
-      const [authChecked, setAuthChecked] = useState(false);
-      const [gidReady, setGidReady] = useState(
-        typeof window !== "undefined" && !!window.google?.accounts?.id
-      );
-      const buttonRef = useRef(null);
- 
-      // 저장된 토큰 복원
-      useEffect(() => {
-        try {
-          const saved = localStorage.getItem(KEY_AUTH_TOKEN);
-          if (saved) {
-            const p = decodeJwtPayload(saved);
-            const email = p ? String(p.email || "").toLowerCase() : "";
-            const valid = p && p.exp * 1000 > Date.now() && email.endsWith("@" + ALLOWED_AUTH_DOMAIN);
-            if (valid) {
-              setAuthUser({ email: p.email, name: p.name, picture: p.picture, token: saved });
-            } else {
-              localStorage.removeItem(KEY_AUTH_TOKEN);
-            }
-          }
-        } catch (e) {}
-        setAuthChecked(true);
-      }, []);
- 
-      // GIS id 라이브러리 로드 대기
-      useEffect(() => {
-        if (gidReady) return;
-        let timer;
-        const check = () => {
-          if (window.google?.accounts?.id) setGidReady(true);
-          else timer = setTimeout(check, 200);
-        };
-        check();
-        return () => timer && clearTimeout(timer);
-      }, [gidReady]);
- 
-      // Sign in with Google 버튼 렌더
-      useEffect(() => {
-        if (!gidReady || authUser || !buttonRef.current) return;
-        window.google.accounts.id.initialize({
-          client_id: DEFAULT_CLIENT_ID,
-          auto_select: false,
-          hd: ALLOWED_AUTH_DOMAIN, // Workspace 계정 힌트
-          callback: (resp) => {
-            const p = decodeJwtPayload(resp.credential);
-            if (!p) { setAuthError("로그인 응답을 해석하지 못했어요. 다시 시도해주세요."); return; }
-            const email = String(p.email || "").toLowerCase();
-            if (!email.endsWith("@" + ALLOWED_AUTH_DOMAIN)) {
-              setAuthError(`이 대시보드는 @${ALLOWED_AUTH_DOMAIN} 계정으로만 접속할 수 있어요. (로그인 시도: ${email || "(알 수 없음)"})`);
-              return;
-            }
-            try { localStorage.setItem(KEY_AUTH_TOKEN, resp.credential); } catch(e) {}
-            setAuthUser({ email: p.email, name: p.name, picture: p.picture, token: resp.credential });
-            setAuthError("");
-          },
-        });
-        window.google.accounts.id.renderButton(buttonRef.current, {
-          theme: "filled_blue",
-          size: "large",
-          text: "signin_with",
-          shape: "pill",
-          logo_alignment: "left",
-          width: 280,
-        });
-      }, [gidReady, authUser]);
- 
-      const signOut = () => {
-        try { localStorage.removeItem(KEY_AUTH_TOKEN); } catch(e) {}
-        if (window.google?.accounts?.id) {
-          window.google.accounts.id.disableAutoSelect();
-        }
-        setAuthUser(null);
-        setAuthError("");
-      };
- 
-      // 로드 직후 깜빡임 방지
-      if (!authChecked) {
-        return (
-          <div className="min-h-screen flex items-center justify-center text-gray-400 text-sm">
-            불러오는 중…
-          </div>
-        );
-      }
- 
-      // 로그인된 상태 — 상단 우측에 사용자 뱃지 띄우고 대시보드 렌더
-      if (authUser) {
-        return (
-          <>
-            <div className="fixed top-3 right-3 z-40 flex items-center gap-2 bg-white shadow-md rounded-full border border-gray-200 pl-1 pr-3 py-1 text-xs">
-              {authUser.picture
-                ? <img src={authUser.picture} referrerPolicy="no-referrer" className="w-6 h-6 rounded-full" alt="" />
-                : <span className="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 inline-flex items-center justify-center text-[10px] font-bold">{(authUser.name || authUser.email || "?")[0]}</span>}
-              <span className="text-gray-700 font-medium max-w-[180px] truncate">
-                {authUser.name || authUser.email}
-              </span>
-              <button onClick={signOut}
-                      className="ml-1 text-gray-400 hover:text-red-600 text-[11px] border-l border-gray-200 pl-2">
-                로그아웃
-              </button>
-            </div>
-            {children}
-          </>
-        );
-      }
- 
-      // 미로그인 — 로그인 화면
-      return (
-        <div className="min-h-screen bg-gradient-to-br from-amber-50 via-white to-indigo-50 flex items-center justify-center p-6">
-          <div className="bg-white rounded-3xl shadow-xl max-w-md w-full p-8 text-center">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600 mb-4">
-              <TableIcon className="w-8 h-8 text-white" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">캐치테이블 미식 파트너스</h1>
-            <p className="text-sm text-gray-600 mb-6 leading-relaxed">
-              매니저 대시보드는 <b className="text-indigo-600">@{ALLOWED_AUTH_DOMAIN}</b> Google 계정으로만
-              접속할 수 있어요.
-            </p>
-            <div ref={buttonRef} className="flex justify-center mb-4 min-h-[44px]" />
-            {!gidReady && (
-              <p className="text-xs text-gray-400">Google 로그인 버튼을 불러오는 중…</p>
-            )}
-            {authError && (
-              <div className="mt-4 text-sm bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 text-left">
-                {authError}
-              </div>
-            )}
-            <p className="mt-6 text-[11px] text-gray-400 leading-relaxed">
-              인플루언서분들은 매니저가 공유해준 <b>개인 정산 링크</b>로 접속하시면
-              <br/>로그인 없이 본인 성과를 확인할 수 있어요.
-            </p>
-          </div>
-        </div>
-      );
-    }
- 
     function Root() {
       if (IS_INFLUENCER_MODE) {
         return <InfluencerView influencerName={URL_INFLUENCER} apiUrl={URL_API} />;
       }
-      return (
-        <DomainLoginGate>
-          <App />
-        </DomainLoginGate>
-      );
+      return <App />;
     }
  
     ReactDOM.createRoot(document.getElementById("root")).render(<Root />);
